@@ -212,7 +212,7 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="always">
 
                   {/* ─ スタンプ ─ */}
                   <View style={styles.section}>
@@ -382,6 +382,19 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                         <Text style={styles.noteEmptyBtnText}>メモ・予定を追加</Text>
                       </TouchableOpacity>
                     )}
+
+                    {/* 確定ボタン（ScrollView内に置きキーボード対応） */}
+                    <TouchableOpacity
+                      style={[styles.saveBtn, { marginTop: 10 }]}
+                      onPress={() => {
+                        const filtered = noteItems.filter((s) => s.trim() !== '');
+                        setNoteItems(date, filtered);
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        onClose();
+                      }}
+                    >
+                      <Text style={styles.saveBtnText}>確定</Text>
+                    </TouchableOpacity>
                   </View>
 
                   {/* ─ 通知 ─ */}
@@ -402,23 +415,8 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                     </View>
                   </View>
 
-                  <View style={{ height: 20 }} />
+                  <View style={{ height: 320 }} />
                 </ScrollView>
-
-                {/* ─ 確定ボタン（常に表示・キーボードに隠れない）─ */}
-                <View style={styles.fixedSaveArea}>
-                  <TouchableOpacity
-                    style={styles.saveBtn}
-                    onPress={() => {
-                      const filtered = noteItems.filter((s) => s.trim() !== '');
-                      setNoteItems(date, filtered);
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      onClose();
-                    }}
-                  >
-                    <Text style={styles.saveBtnText}>確定</Text>
-                  </TouchableOpacity>
-                </View>
               </KeyboardAvoidingView>
             </Animated.View>
           </TouchableWithoutFeedback>
@@ -602,11 +600,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   noteEmptyBtnText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
-  fixedSaveArea: {
-    paddingHorizontal: 0, paddingTop: 8, paddingBottom: 4,
-    borderTopWidth: 1, borderTopColor: '#F0E8F8',
-    backgroundColor: '#FDFAFF',
-  },
   saveBtn: {
     backgroundColor: colors.primary,
     borderRadius: 10, paddingVertical: 12, alignItems: 'center',
