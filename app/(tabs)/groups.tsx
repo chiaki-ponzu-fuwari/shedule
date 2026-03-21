@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, TextInput, SafeAreaView, Platform, Alert,
+  Modal, TextInput, SafeAreaView, Platform, Alert, ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
+import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGroupStore } from '../../store/groupStore';
 import { colors } from '../../constants/colors';
@@ -15,22 +16,27 @@ import { Group } from '../../types';
 const GROUP_COLORS = ['#FF6B9D', '#A78BFA', '#34D399', '#60A5FA', '#FBBF24', '#FB923C'];
 const GROUP_EMOJIS = ['🌸', '⭐', '🌿', '🎵', '🏠', '🎮', '🐾', '☕', '🌙', '🎨'];
 
-function generateCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+function makeInviteUrl(code: string): string {
+  return `scheduleshare://join/${code}`;
 }
 
 export default function GroupsScreen() {
   const insets = useSafeAreaInsets();
   const groups = useGroupStore((s) => s.groups);
-  const addGroup = useGroupStore((s) => s.addGroup);
-  const removeGroup = useGroupStore((s) => s.removeGroup);
-  const updateMemo = useGroupStore((s) => s.updateMemo);
+  const loading = useGroupStore((s) => s.loading);
+  const fetchGroups = useGroupStore((s) => s.fetchGroups);
+  const createGroup = useGroupStore((s) => s.createGroup);
+  const joinGroupByCode = useGroupStore((s) => s.joinGroupByCode);
+  const deleteGroup = useGroupStore((s) => s.deleteGroup);
+  const updateSharedMemo = useGroupStore((s) => s.updateSharedMemo);
   const myName = useGroupStore((s) => s.myName);
 
   const [createVisible, setCreateVisible] = useState(false);
   const [joinVisible, setJoinVisible] = useState(false);
   const [detailGroup, setDetailGroup] = useState<Group | null>(null);
   const [memoEdit, setMemoEdit] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
 
   // Create form
   const [newName, setNewName] = useState('');
@@ -38,50 +44,71 @@ export default function GroupsScreen() {
   const [newEmoji, setNewEmoji] = useState(GROUP_EMOJIS[0]);
   const [joinCode, setJoinCode] = useState('');
 
-  const handleCreate = () => {
+  useEffect(() => {
+    fetchGroups();
+  }, []);
+
+  // Sync detailGroup with latest store data
+  useEffect(() => {
+    if (detailGroup) {
+      const updated = groups.find((g) => g.id === detailGroup.id);
+      if (updated) setDetailGroup(updated);
+    }
+  }, [groups]);
+
+  const handleCreate = async () => {
     if (!newName.trim()) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const group: Group = {
-      id: `group_${Date.now()}`,
-      name: newName.trim(),
-      color: newColor,
-      emoji: newEmoji,
-      inviteCode: generateCode(),
-      members: [{ id: 'me', name: myName, color: newColor, isOwner: true }],
-      sharedMemo: '',
-      createdAt: new Date().toISOString(),
-    };
-    addGroup(group);
-    setNewName('');
-    setCreateVisible(false);
+    setCreating(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const group = await createGroup(newName.trim(), newColor, newEmoji);
+    setCreating(false);
+    if (group) {
+      setNewName('');
+      setCreateVisible(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      Alert.alert('エラー', 'グループの作成に失敗しました。接続を確認してください。');
+    }
   };
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!joinCode.trim()) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // In a real app, this would hit the backend. For now, create a demo group.
-    const group: Group = {
-      id: `group_${Date.now()}`,
-      name: `グループ（${joinCode.toUpperCase()}）`,
-      color: GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)],
-      emoji: GROUP_EMOJIS[Math.floor(Math.random() * GROUP_EMOJIS.length)],
-      inviteCode: joinCode.toUpperCase(),
-      members: [
-        { id: 'me', name: myName, color: colors.primary },
-        { id: 'host', name: 'ホスト', color: '#A78BFA', isOwner: true },
-      ],
-      sharedMemo: '',
-      createdAt: new Date().toISOString(),
-    };
-    addGroup(group);
-    setJoinCode('');
-    setJoinVisible(false);
+    setJoining(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const group = await joinGroupByCode(joinCode);
+    setJoining(false);
+    if (group) {
+      setJoinCode('');
+      setJoinVisible(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      Alert.alert('エラー', '招待コードが見つかりません。コードを確認してください。');
+    }
   };
 
-  const copyCode = async (code: string) => {
-    await Clipboard.setStringAsync(code);
+  const handleDelete = (group: Group) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert('グループを退出', `「${group.name}」から退出しますか？`, [
+      { text: 'キャンセル', style: 'cancel' },
+      {
+        text: '退出', style: 'destructive', onPress: async () => {
+          await deleteGroup(group.id);
+          setDetailGroup(null);
+        }
+      },
+    ]);
+  };
+
+  const shareInvite = async (group: Group) => {
+    const url = makeInviteUrl(group.inviteCode);
+    const message = `「${group.name}」に招待します！\n招待コード: ${group.inviteCode}\n\nアプリで開く: ${url}`;
+    const canShare = await Sharing.isAvailableAsync();
+    if (canShare) {
+      // expo-sharing requires a file, so we copy to clipboard and show alert
+    }
+    await Clipboard.setStringAsync(message);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert('コピーしました', `招待コード「${code}」をコピーしました`);
+    Alert.alert('招待リンクをコピーしました', `招待コード: ${group.inviteCode}\n\n招待メッセージをクリップボードにコピーしました。友達に送ってください。`);
   };
 
   return (
@@ -90,6 +117,9 @@ export default function GroupsScreen() {
       <LinearGradient colors={['#FFE4F0', '#EDE9FE']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <Text style={styles.headerTitle}>グループ共有</Text>
         <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => { fetchGroups(); Haptics.selectionAsync(); }}>
+            <Ionicons name="refresh" size={18} color={colors.primary} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.headerBtn} onPress={() => setJoinVisible(true)}>
             <Ionicons name="link" size={18} color={colors.primary} />
           </TouchableOpacity>
@@ -100,7 +130,11 @@ export default function GroupsScreen() {
       </LinearGradient>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-        {groups.length === 0 ? (
+        {loading && groups.length === 0 ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : groups.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyEmoji}>👥</Text>
             <Text style={styles.emptyTitle}>グループがありません</Text>
@@ -196,11 +230,15 @@ export default function GroupsScreen() {
                 <Text style={styles.cancelBtnText}>キャンセル</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.confirmBtn, !newName.trim() && styles.confirmBtnDisabled]}
+                style={[styles.confirmBtn, (!newName.trim() || creating) && styles.confirmBtnDisabled]}
                 onPress={handleCreate}
-                disabled={!newName.trim()}
+                disabled={!newName.trim() || creating}
               >
-                <Text style={styles.confirmBtnText}>作成する</Text>
+                {creating ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.confirmBtnText}>作成する</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -229,11 +267,15 @@ export default function GroupsScreen() {
                 <Text style={styles.cancelBtnText}>キャンセル</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.confirmBtn, !joinCode.trim() && styles.confirmBtnDisabled]}
+                style={[styles.confirmBtn, (!joinCode.trim() || joining) && styles.confirmBtnDisabled]}
                 onPress={handleJoin}
-                disabled={!joinCode.trim()}
+                disabled={!joinCode.trim() || joining}
               >
-                <Text style={styles.confirmBtnText}>参加する</Text>
+                {joining ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.confirmBtnText}>参加する</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -244,7 +286,7 @@ export default function GroupsScreen() {
       {detailGroup && (
         <Modal transparent animationType="slide" visible={!!detailGroup} onRequestClose={() => setDetailGroup(null)} statusBarTranslucent>
           <View style={styles.modalOverlay}>
-            <View style={styles.modalSheet}>
+            <ScrollView contentContainerStyle={styles.modalSheetScroll} keyboardShouldPersistTaps="always">
               <View style={styles.handle} />
               <View style={styles.detailHeader}>
                 <Text style={styles.detailEmoji}>{detailGroup.emoji}</Text>
@@ -252,25 +294,22 @@ export default function GroupsScreen() {
                   <Text style={styles.modalTitle}>{detailGroup.name}</Text>
                   <Text style={styles.groupMembers}>{detailGroup.members.length}人のメンバー</Text>
                 </View>
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    Alert.alert('グループを削除', `「${detailGroup.name}」を削除しますか？`, [
-                      { text: 'キャンセル', style: 'cancel' },
-                      { text: '削除', style: 'destructive', onPress: () => { removeGroup(detailGroup.id); setDetailGroup(null); } },
-                    ]);
-                  }}
-                >
-                  <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                <TouchableOpacity onPress={() => handleDelete(detailGroup)}>
+                  <Ionicons name="exit-outline" size={22} color="#EF4444" />
                 </TouchableOpacity>
               </View>
 
-              {/* Invite code */}
-              <TouchableOpacity style={styles.inviteCodeRow} onPress={() => copyCode(detailGroup.inviteCode)}>
-                <Text style={styles.inviteCodeLabel}>招待コード</Text>
-                <Text style={styles.inviteCode}>{detailGroup.inviteCode}</Text>
-                <Ionicons name="copy-outline" size={16} color={colors.primary} />
-              </TouchableOpacity>
+              {/* Invite / Share */}
+              <View style={styles.inviteCodeRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inviteCodeLabel}>招待コード</Text>
+                  <Text style={styles.inviteCode}>{detailGroup.inviteCode}</Text>
+                </View>
+                <TouchableOpacity style={styles.shareBtn} onPress={() => shareInvite(detailGroup)}>
+                  <Ionicons name="share-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.shareBtnText}>招待を共有</Text>
+                </TouchableOpacity>
+              </View>
 
               {/* Members */}
               <Text style={styles.fieldLabel}>メンバー</Text>
@@ -290,7 +329,7 @@ export default function GroupsScreen() {
                 style={styles.memoInput}
                 value={memoEdit}
                 onChangeText={setMemoEdit}
-                onBlur={() => updateMemo(detailGroup.id, memoEdit)}
+                onBlur={() => updateSharedMemo(detailGroup.id, memoEdit)}
                 placeholder="グループ全員で編集できるメモ..."
                 placeholderTextColor={colors.textLight}
                 multiline
@@ -300,7 +339,8 @@ export default function GroupsScreen() {
               <TouchableOpacity style={styles.confirmBtn} onPress={() => setDetailGroup(null)}>
                 <Text style={styles.confirmBtnText}>閉じる</Text>
               </TouchableOpacity>
-            </View>
+              <View style={{ height: 20 }} />
+            </ScrollView>
           </View>
         </Modal>
       )}
@@ -336,6 +376,7 @@ const styles = StyleSheet.create({
   // Modal styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(45,27,105,0.45)', justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingBottom: 40, maxHeight: '90%' },
+  modalSheetScroll: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingBottom: 40 },
   handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0D0F0', alignSelf: 'center', marginTop: 10, marginBottom: 8 },
   modalTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 4, marginTop: 8 },
   fieldLabel: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: 16, marginBottom: 8 },
@@ -356,9 +397,11 @@ const styles = StyleSheet.create({
   confirmBtnText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
   detailHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   detailEmoji: { fontSize: 36 },
-  inviteCodeRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5EFF5', borderRadius: 12, padding: 14, gap: 8, marginTop: 8 },
-  inviteCodeLabel: { fontSize: 12, fontWeight: '600', color: colors.textSecondary, flex: 1 },
-  inviteCode: { fontSize: 18, fontWeight: '800', color: colors.primary, letterSpacing: 3 },
+  inviteCodeRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5EFF5', borderRadius: 12, padding: 14, gap: 12, marginTop: 8 },
+  inviteCodeLabel: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  inviteCode: { fontSize: 20, fontWeight: '800', color: colors.primary, letterSpacing: 3 },
+  shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  shareBtnText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
   memberName: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1 },
   ownerBadge: { backgroundColor: '#FFE4F0', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
