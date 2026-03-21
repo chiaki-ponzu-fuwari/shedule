@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, Modal, TouchableOpacity, TouchableWithoutFeedback,
   StyleSheet, Animated, Dimensions, TextInput, Switch,
-  Image, ScrollView, KeyboardAvoidingView, Platform, Alert,
+  Image, ScrollView, Platform, Alert, Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -92,6 +92,15 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
   const [noteItems, setNoteItemsLocal] = useState<string[]>([]);
   const [startVal, setStartVal] = useState('');
   const [endVal, setEndVal] = useState('');
+  const [keyboardPad, setKeyboardPad] = useState(0);
+
+  useEffect(() => {
+    const showEv = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEv = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEv, (e) => setKeyboardPad(e.endCoordinates.height));
+    const hideSub = Keyboard.addListener(hideEv, () => setKeyboardPad(0));
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -187,12 +196,11 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
     >
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.overlay}>
-          <TouchableWithoutFeedback onPress={() => {}}>
-            <Animated.View style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}>
-              <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                style={{ flex: 1 }}
-              >
+          <Animated.View
+            style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
+            onStartShouldSetResponder={() => true}
+          >
+              <View style={{ flex: 1 }}>
                 {/* Handle */}
                 <View style={styles.handle} />
 
@@ -212,7 +220,11 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="always">
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="always"
+                  contentContainerStyle={{ paddingBottom: keyboardPad + 20 }}
+                >
 
                   {/* ─ スタンプ ─ */}
                   <View style={styles.section}>
@@ -415,11 +427,9 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                     </View>
                   </View>
 
-                  <View style={{ height: 320 }} />
                 </ScrollView>
-              </KeyboardAvoidingView>
+              </View>
             </Animated.View>
-          </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
 
