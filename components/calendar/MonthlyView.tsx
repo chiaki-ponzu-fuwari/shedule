@@ -119,7 +119,7 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
                 onPress={() => onDayPress(day.dateString)}
                 isSelected={selectedDate === day.dateString}
                 imageUri={entry?.imageUri}
-                hasNotes={!!entry?.notes}
+                hasNotes={!!(entry?.notes || (entry?.noteItems && entry.noteItems.length > 0))}
               />
             );
           })}

@@ -40,7 +40,8 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
   const mainStamp = entry?.mainStampId ? getStamp(entry.mainStampId) : undefined;
   const leftMini = entry?.miniStamps?.left ? getStamp(entry.miniStamps.left) : undefined;
   const rightMini = entry?.miniStamps?.right ? getStamp(entry.miniStamps.right) : undefined;
-  const hasContent = mainStamp || leftMini || rightMini || entry?.notes || entry?.startTime || entry?.endTime || entry?.imageUri;
+  const hasNoteItems = (entry?.noteItems?.length ?? 0) > 0;
+  const hasContent = mainStamp || leftMini || rightMini || entry?.notes || hasNoteItems || entry?.startTime || entry?.endTime || entry?.imageUri;
 
   const d = parseDate(date);
   const daySpecials = specialDates.filter((sd) => sd.month === d.getMonth() + 1 && sd.day === d.getDate());
@@ -169,8 +170,19 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
                     </View>
                   )}
 
-                  {/* メモ */}
-                  {entry?.notes ? (
+                  {/* メモ・予定リスト */}
+                  {hasNoteItems && (
+                    <View style={styles.notesBox}>
+                      {entry!.noteItems!.map((item, idx) => (
+                        <View key={idx} style={[styles.noteItemRow, idx > 0 && { borderTopWidth: 1, borderTopColor: '#EDE9FE', marginTop: 6, paddingTop: 6 }]}>
+                          <Ionicons name="ellipse" size={6} color={colors.primary} style={{ marginTop: 7 }} />
+                          <Text style={styles.notesText}>{item}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  {/* 旧フォーマットのメモ（互換） */}
+                  {!hasNoteItems && entry?.notes ? (
                     <View style={styles.notesBox}>
                       <Text style={styles.notesText}>{entry.notes}</Text>
                     </View>
@@ -329,7 +341,8 @@ const styles = StyleSheet.create({
   notesBox: {
     backgroundColor: '#F5EFF5', borderRadius: 12, padding: 12,
   },
-  notesText: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  noteItemRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  notesText: { flex: 1, fontSize: 14, color: colors.text, lineHeight: 20 },
 
   emptyBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { fontSize: 14, color: colors.textLight },

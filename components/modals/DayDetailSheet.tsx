@@ -382,17 +382,6 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                         <Text style={styles.noteEmptyBtnText}>メモ・予定を追加</Text>
                       </TouchableOpacity>
                     )}
-                    <TouchableOpacity
-                      style={styles.saveBtn}
-                      onPress={() => {
-                        const filtered = noteItems.filter((s) => s.trim() !== '');
-                        setNoteItems(date, filtered);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        onClose();
-                      }}
-                    >
-                      <Text style={styles.saveBtnText}>確定</Text>
-                    </TouchableOpacity>
                   </View>
 
                   {/* ─ 通知 ─ */}
@@ -413,8 +402,23 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                     </View>
                   </View>
 
-                  <View style={{ height: 40 }} />
+                  <View style={{ height: 20 }} />
                 </ScrollView>
+
+                {/* ─ 確定ボタン（常に表示・キーボードに隠れない）─ */}
+                <View style={styles.fixedSaveArea}>
+                  <TouchableOpacity
+                    style={styles.saveBtn}
+                    onPress={() => {
+                      const filtered = noteItems.filter((s) => s.trim() !== '');
+                      setNoteItems(date, filtered);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      onClose();
+                    }}
+                  >
+                    <Text style={styles.saveBtnText}>確定</Text>
+                  </TouchableOpacity>
+                </View>
               </KeyboardAvoidingView>
             </Animated.View>
           </TouchableWithoutFeedback>
@@ -598,9 +602,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   noteEmptyBtnText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  fixedSaveArea: {
+    paddingHorizontal: 0, paddingTop: 8, paddingBottom: 4,
+    borderTopWidth: 1, borderTopColor: '#F0E8F8',
+    backgroundColor: '#FDFAFF',
+  },
   saveBtn: {
-    marginTop: 8, backgroundColor: colors.primary,
-    borderRadius: 10, paddingVertical: 10, alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 10, paddingVertical: 12, alignItems: 'center',
+    shadowColor: colors.primary, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25, shadowRadius: 6, elevation: 3,
   },
   saveBtnText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF' },
 
