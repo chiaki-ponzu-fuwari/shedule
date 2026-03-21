@@ -11,6 +11,7 @@ import { useStampStore } from '../../store/stampStore';
 import { useGroupStore } from '../../store/groupStore';
 import { useCalendarStore } from '../../store/calendarStore';
 import { colors } from '../../constants/colors';
+import { Stamp } from '../../types';
 import { AddStampModal } from '../../components/modals/AddStampModal';
 import { RecurringModal } from '../../components/modals/RecurringModal';
 import { BirthdayModal } from '../../components/modals/BirthdayModal';
@@ -313,8 +314,6 @@ export default function SettingsScreen() {
 }
 
 // ── スタンプ行コンポーネント ──
-import { Stamp } from '../../types';
-
 function StampRow({
   stamp,
   onEdit,
