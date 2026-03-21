@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
-import { Group, GroupMember } from '../types';
+import { Group, GroupMember, GroupSharingSettings, SharedEntry, SyncEntryData } from '../types';
 
 const MEMBER_COLORS = ['#FF6B9D', '#A78BFA', '#34D399', '#60A5FA', '#FBBF24', '#FB923C'];
 
@@ -34,17 +34,24 @@ function rowToGroup(g: any, allMembers: any[]): Group {
   };
 }
 
+const DEFAULT_SHARING: GroupSharingSettings = { shareMain: true, shareMini: false, shareNotes: false };
+
 interface GroupState {
   groups: Group[];
   myUserId: string;
   myName: string;
   loading: boolean;
+  sharingSettings: Record<string, GroupSharingSettings>;
+  sharedEntries: Record<string, SharedEntry[]>;
   setMyName: (name: string) => void;
+  setSharingSettings: (groupId: string, settings: GroupSharingSettings) => void;
   createGroup: (name: string, color: string, emoji: string) => Promise<Group | null>;
   joinGroupByCode: (inviteCode: string) => Promise<Group | null>;
   fetchGroups: () => Promise<void>;
   deleteGroup: (groupId: string) => Promise<void>;
   updateSharedMemo: (groupId: string, memo: string) => Promise<void>;
+  syncMySchedule: (groupId: string, entries: SyncEntryData[]) => Promise<void>;
+  fetchGroupSchedules: (groupId: string) => Promise<void>;
 }
 
 export const useGroupStore = create<GroupState>()(
@@ -54,8 +61,15 @@ export const useGroupStore = create<GroupState>()(
       myUserId: generateUserId(),
       myName: 'わたし',
       loading: false,
+      sharingSettings: {},
+      sharedEntries: {},
 
       setMyName: (name) => set({ myName: name }),
+
+      setSharingSettings: (groupId, settings) =>
+        set((state) => ({
+          sharingSettings: { ...state.sharingSettings, [groupId]: settings },
+        })),
 
       createGroup: async (name, color, emoji) => {
         const { myUserId, myName } = get();
@@ -111,7 +125,6 @@ export const useGroupStore = create<GroupState>()(
           return null;
         }
 
-        // Already a member?
         const { data: existing } = await supabase
           .from('group_members')
           .select('id')
@@ -205,12 +218,75 @@ export const useGroupStore = create<GroupState>()(
           groups: state.groups.map((g) => (g.id === groupId ? { ...g, sharedMemo: memo } : g)),
         }));
       },
+
+      syncMySchedule: async (groupId, entries) => {
+        const { myUserId, myName, groups } = get();
+        const myMember = groups.find((g) => g.id === groupId)?.members.find((m) => m.id === myUserId);
+        const myColor = myMember?.color ?? '#A78BFA';
+
+        // 既存データを削除してから再挿入
+        await supabase
+          .from('shared_entries')
+          .delete()
+          .eq('group_id', groupId)
+          .eq('user_id', myUserId);
+
+        if (entries.length === 0) return;
+
+        const rows = entries.map((e) => ({
+          group_id: groupId,
+          user_id: myUserId,
+          user_name: myName,
+          user_color: myColor,
+          date: e.date,
+          main_stamp_text: e.mainStampText ?? null,
+          main_stamp_bg: e.mainStampBg ?? null,
+          main_stamp_text_color: e.mainStampTextColor ?? null,
+          mini_left_text: e.miniLeftText ?? null,
+          mini_left_bg: e.miniLeftBg ?? null,
+          mini_right_text: e.miniRightText ?? null,
+          mini_right_bg: e.miniRightBg ?? null,
+          notes: e.notes ?? null,
+        }));
+
+        await supabase.from('shared_entries').insert(rows);
+      },
+
+      fetchGroupSchedules: async (groupId) => {
+        const { data } = await supabase
+          .from('shared_entries')
+          .select('*')
+          .eq('group_id', groupId)
+          .order('date', { ascending: true });
+
+        const entries: SharedEntry[] = (data ?? []).map((row: any) => ({
+          userId: row.user_id,
+          userName: row.user_name,
+          userColor: row.user_color,
+          date: row.date,
+          mainStampText: row.main_stamp_text ?? undefined,
+          mainStampBg: row.main_stamp_bg ?? undefined,
+          mainStampTextColor: row.main_stamp_text_color ?? undefined,
+          miniLeftText: row.mini_left_text ?? undefined,
+          miniLeftBg: row.mini_left_bg ?? undefined,
+          miniRightText: row.mini_right_text ?? undefined,
+          miniRightBg: row.mini_right_bg ?? undefined,
+          notes: row.notes ?? undefined,
+        }));
+
+        set((state) => ({
+          sharedEntries: { ...state.sharedEntries, [groupId]: entries },
+        }));
+      },
     }),
     {
       name: 'group-storage',
       storage: createJSONStorage(() => AsyncStorage),
-      // Only persist user identity - groups come from Supabase
-      partialize: (state) => ({ myUserId: state.myUserId, myName: state.myName }),
+      partialize: (state) => ({
+        myUserId: state.myUserId,
+        myName: state.myName,
+        sharingSettings: state.sharingSettings,
+      }),
     }
   )
 );

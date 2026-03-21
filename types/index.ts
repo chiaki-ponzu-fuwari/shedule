@@ -78,6 +78,39 @@ export interface Group {
   createdAt: string;
 }
 
+export interface GroupSharingSettings {
+  shareMain: boolean;
+  shareMini: boolean;
+  shareNotes: boolean;
+}
+
+export interface SharedEntry {
+  userId: string;
+  userName: string;
+  userColor: string;
+  date: string;
+  mainStampText?: string;
+  mainStampBg?: string;
+  mainStampTextColor?: string;
+  miniLeftText?: string;
+  miniLeftBg?: string;
+  miniRightText?: string;
+  miniRightBg?: string;
+  notes?: string;
+}
+
+export interface SyncEntryData {
+  date: string;
+  mainStampText?: string;
+  mainStampBg?: string;
+  mainStampTextColor?: string;
+  miniLeftText?: string;
+  miniLeftBg?: string;
+  miniRightText?: string;
+  miniRightBg?: string;
+  notes?: string;
+}
+
 export type CalendarView = 'monthly' | 'weekly' | 'daily';
 
 export interface DayInfo {
