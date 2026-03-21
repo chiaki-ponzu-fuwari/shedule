@@ -6,6 +6,16 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+
+const hapticImpact = (style = Haptics.ImpactFeedbackStyle.Medium) => {
+  if (Platform.OS !== 'web') Haptics.impactAsync(style);
+};
+const hapticSelect = () => {
+  if (Platform.OS !== 'web') Haptics.selectionAsync();
+};
+const hapticNotify = (type = Haptics.NotificationFeedbackType.Success) => {
+  if (Platform.OS !== 'web') Haptics.notificationAsync(type);
+};
 import * as Clipboard from 'expo-clipboard';
 import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +47,7 @@ export default function GroupsScreen() {
   const [memoEdit, setMemoEdit] = useState('');
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   // Create form
   const [newName, setNewName] = useState('');
@@ -59,35 +70,42 @@ export default function GroupsScreen() {
   const handleCreate = async () => {
     if (!newName.trim()) return;
     setCreating(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const group = await createGroup(newName.trim(), newColor, newEmoji);
-    setCreating(false);
-    if (group) {
-      setNewName('');
-      setCreateVisible(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else {
-      Alert.alert('エラー', 'グループの作成に失敗しました。接続を確認してください。');
+    setCreateError('');
+    hapticImpact();
+    try {
+      console.log('[handleCreate] start, name=', newName);
+      const group = await createGroup(newName.trim(), newColor, newEmoji);
+      console.log('[handleCreate] result=', group);
+      setCreating(false);
+      if (group) {
+        setNewName('');
+        setCreateVisible(false);
+        hapticNotify();
+      }
+    } catch (e: any) {
+      console.error('[handleCreate] error=', e);
+      setCreating(false);
+      setCreateError(e?.message ?? String(e));
     }
   };
 
   const handleJoin = async () => {
     if (!joinCode.trim()) return;
     setJoining(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticImpact();
     const group = await joinGroupByCode(joinCode);
     setJoining(false);
     if (group) {
       setJoinCode('');
       setJoinVisible(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticNotify();
     } else {
       Alert.alert('エラー', '招待コードが見つかりません。コードを確認してください。');
     }
   };
 
   const handleDelete = (group: Group) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticImpact();
     Alert.alert('グループを退出', `「${group.name}」から退出しますか？`, [
       { text: 'キャンセル', style: 'cancel' },
       {
@@ -102,12 +120,8 @@ export default function GroupsScreen() {
   const shareInvite = async (group: Group) => {
     const url = makeInviteUrl(group.inviteCode);
     const message = `「${group.name}」に招待します！\n招待コード: ${group.inviteCode}\n\nアプリで開く: ${url}`;
-    const canShare = await Sharing.isAvailableAsync();
-    if (canShare) {
-      // expo-sharing requires a file, so we copy to clipboard and show alert
-    }
     await Clipboard.setStringAsync(message);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    hapticNotify();
     Alert.alert('招待リンクをコピーしました', `招待コード: ${group.inviteCode}\n\n招待メッセージをクリップボードにコピーしました。友達に送ってください。`);
   };
 
@@ -117,7 +131,7 @@ export default function GroupsScreen() {
       <LinearGradient colors={['#FFE4F0', '#EDE9FE']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <Text style={styles.headerTitle}>グループ共有</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => { fetchGroups(); Haptics.selectionAsync(); }}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => { fetchGroups(); hapticSelect(); }}>
             <Ionicons name="refresh" size={18} color={colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerBtn} onPress={() => setJoinVisible(true)}>
@@ -209,7 +223,7 @@ export default function GroupsScreen() {
                 <TouchableOpacity
                   key={e}
                   style={[styles.emojiBtn, newEmoji === e && styles.emojiBtnActive]}
-                  onPress={() => { Haptics.selectionAsync(); setNewEmoji(e); }}
+                  onPress={() => { hapticSelect(); setNewEmoji(e); }}
                 >
                   <Text style={styles.emojiText}>{e}</Text>
                 </TouchableOpacity>
@@ -221,12 +235,15 @@ export default function GroupsScreen() {
                 <TouchableOpacity
                   key={c}
                   style={[styles.colorDot, { backgroundColor: c }, newColor === c && styles.colorDotSelected]}
-                  onPress={() => { Haptics.selectionAsync(); setNewColor(c); }}
+                  onPress={() => { hapticSelect(); setNewColor(c); }}
                 />
               ))}
             </View>
+            {createError ? (
+              <Text style={styles.errorText}>{createError}</Text>
+            ) : null}
             <View style={styles.modalBtns}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setCreateVisible(false)}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setCreateVisible(false); setCreateError(''); }}>
                 <Text style={styles.cancelBtnText}>キャンセル</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -407,4 +424,5 @@ const styles = StyleSheet.create({
   ownerBadge: { backgroundColor: '#FFE4F0', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   ownerText: { fontSize: 11, fontWeight: '700', color: colors.primary },
   memoInput: { borderWidth: 2, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: colors.text, minHeight: 80, textAlignVertical: 'top', marginBottom: 16 },
+  errorText: { fontSize: 13, color: '#EF4444', fontWeight: '600', marginTop: 8, textAlign: 'center' },
 });

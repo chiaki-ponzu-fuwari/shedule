@@ -68,8 +68,8 @@ export const useGroupStore = create<GroupState>()(
           .single();
 
         if (groupErr || !groupData) {
-          console.error('createGroup error:', groupErr);
-          return null;
+          console.error('createGroup error:', JSON.stringify(groupErr));
+          throw new Error(groupErr?.message ?? 'グループ作成失敗');
         }
 
         const { error: memberErr } = await supabase
@@ -77,8 +77,8 @@ export const useGroupStore = create<GroupState>()(
           .insert({ group_id: groupData.id, user_id: myUserId, user_name: myName, color, is_owner: true });
 
         if (memberErr) {
-          console.error('addMember error:', memberErr);
-          return null;
+          console.error('addMember error:', JSON.stringify(memberErr));
+          throw new Error(memberErr?.message ?? 'メンバー追加失敗');
         }
 
         const group: Group = {
