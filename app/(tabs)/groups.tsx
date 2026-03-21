@@ -42,10 +42,13 @@ export default function GroupsScreen() {
 
   const [createVisible, setCreateVisible] = useState(false);
   const [joinVisible, setJoinVisible] = useState(false);
-  const [detailGroup, setDetailGroup] = useState<Group | null>(null);
+  const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [createError, setCreateError] = useState('');
+
+  // IDからグループを都度取得（無限ループ防止）
+  const detailGroup = detailGroupId ? (groups.find((g) => g.id === detailGroupId) ?? null) : null;
 
   // Create form
   const [newName, setNewName] = useState('');
@@ -56,14 +59,6 @@ export default function GroupsScreen() {
   useEffect(() => {
     fetchGroups();
   }, []);
-
-  // detailGroupを最新データと同期
-  useEffect(() => {
-    if (detailGroup) {
-      const updated = groups.find((g) => g.id === detailGroup.id);
-      if (updated) setDetailGroup(updated);
-    }
-  }, [groups]);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -109,7 +104,7 @@ export default function GroupsScreen() {
       {
         text: '退出', style: 'destructive', onPress: async () => {
           await deleteGroup(group.id);
-          setDetailGroup(null);
+          setDetailGroupId(null);
         }
       },
     ]);
@@ -164,7 +159,7 @@ export default function GroupsScreen() {
               <TouchableOpacity
                 key={group.id}
                 style={styles.groupCard}
-                onPress={() => setDetailGroup(group)}
+                onPress={() => setDetailGroupId(group.id)}
                 activeOpacity={0.85}
               >
                 <View style={[styles.groupIcon, { backgroundColor: group.color + '22' }]}>
@@ -302,7 +297,7 @@ export default function GroupsScreen() {
         <GroupDetailSheet
           group={detailGroup}
           visible={!!detailGroup}
-          onClose={() => setDetailGroup(null)}
+          onClose={() => setDetailGroupId(null)}
           onDelete={handleDelete}
           onShare={shareInvite}
         />

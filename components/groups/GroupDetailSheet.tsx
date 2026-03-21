@@ -43,8 +43,9 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
   const getStamp = useStampStore((s) => s.getStamp);
 
   useEffect(() => {
+    if (!visible) return;
     setMemoEdit(group.sharedMemo ?? '');
-  }, [group.sharedMemo]);
+  }, [visible]);
 
   useEffect(() => {
     if (visible && tab === 'schedule') {
