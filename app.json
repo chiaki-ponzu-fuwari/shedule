@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "スケジュール",
+    "slug": "schedule-share-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "scheduleshare",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.scheduleshare.app"
+    },
+    "android": {
+      "package": "com.scheduleshare.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF0F5"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-asset",
+      "expo-font",
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
