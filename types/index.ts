@@ -23,6 +23,7 @@ export interface DayEntry {
   mainStampId?: string;
   miniStamps: MiniStamps;
   notes?: string;
+  noteItems?: string[];          // 複数メモ・予定リスト
   privacyLevel: PrivacyLevel;
   startTime?: string;            // "HH:MM"
   endTime?: string;              // "HH:MM"
@@ -30,7 +31,7 @@ export interface DayEntry {
   imageUri?: string;             // photo URI for image stamp
   timeSlots?: TimeSlot[];        // timeline events
   diary?: string;                // 日記テキスト
-  diaryPhotos?: string[];        // 写真URI（最大2枚）
+  diaryPhotos?: string[];        // 写真URI（枚数制限なし）
 }
 
 export interface TimeSlot {

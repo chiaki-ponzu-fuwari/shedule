@@ -27,6 +27,7 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
   const entries = useCalendarStore((s) => s.entries);
   const specialDates = useCalendarStore((s) => s.specialDates);
   const recurringSchedules = useCalendarStore((s) => s.recurringSchedules);
+  const weekStartDay = useCalendarStore((s) => s.weekStartDay);
   const getStamp = useStampStore((s) => s.getStamp);
   const setDiary = useCalendarStore((s) => s.setDiary);
   const setDiaryPhotos = useCalendarStore((s) => s.setDiaryPhotos);
@@ -51,7 +52,7 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
     setDiaryText(selectedDate ? (entries[selectedDate]?.diary ?? '') : '');
   }, [selectedDate]);
 
-  const handlePickPhoto = async (index: number) => {
+  const handlePickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') return;
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -61,9 +62,7 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
     });
     if (!result.canceled && result.assets[0]?.uri && selectedDate) {
       const current = selectedEntry?.diaryPhotos ?? [];
-      const updated = [...current];
-      updated[index] = result.assets[0].uri;
-      setDiaryPhotos(selectedDate, updated.slice(0, 2));
+      setDiaryPhotos(selectedDate, [...current, result.assets[0].uri]);
     }
   };
 
@@ -73,13 +72,12 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
       { text: 'キャンセル', style: 'cancel' },
       { text: '削除', style: 'destructive', onPress: () => {
         const current = selectedEntry?.diaryPhotos ?? [];
-        const updated = current.filter((_, i) => i !== index);
-        setDiaryPhotos(selectedDate, updated);
+        setDiaryPhotos(selectedDate, current.filter((_, i) => i !== index));
       }},
     ]);
   };
 
-  const days = getWeekDays(currentDate, specialDates);
+  const days = getWeekDays(currentDate, specialDates, weekStartDay);
   const weekStart = days[0];
   const weekEnd = days[6];
 
@@ -243,33 +241,23 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
             />
 
             {/* 写真 */}
-            <View style={styles.photoRow}>
-              {[0, 1].map((i) => {
-                const uri = selectedEntry?.diaryPhotos?.[i];
-                return uri ? (
-                  <TouchableOpacity
-                    key={i}
-                    style={styles.photoSlot}
-                    onLongPress={() => handleRemovePhoto(i)}
-                    activeOpacity={0.85}
-                  >
-                    <Image source={{ uri }} style={styles.photoImg} />
-                    <TouchableOpacity style={styles.photoDelete} onPress={() => handleRemovePhoto(i)}>
-                      <Ionicons name="close-circle" size={20} color="#EF4444" />
-                    </TouchableOpacity>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoRow}>
+              {(selectedEntry?.diaryPhotos ?? []).map((uri, i) => (
+                <View key={i} style={styles.photoSlot}>
+                  <Image source={{ uri }} style={styles.photoImg} />
+                  <TouchableOpacity style={styles.photoDelete} onPress={() => handleRemovePhoto(i)}>
+                    <Ionicons name="close-circle" size={20} color="#EF4444" />
                   </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    key={i}
-                    style={styles.photoSlotEmpty}
-                    onPress={() => { Haptics.selectionAsync(); handlePickPhoto(i); }}
-                  >
-                    <Ionicons name="camera-outline" size={24} color={colors.primaryLight} />
-                    <Text style={styles.photoAddLabel}>写真を追加</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={styles.photoSlotEmpty}
+                onPress={() => { Haptics.selectionAsync(); handlePickPhoto(); }}
+              >
+                <Ionicons name="camera-outline" size={24} color={colors.primaryLight} />
+                <Text style={styles.photoAddLabel}>追加</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         )}
         <View style={{ height: 32 }} />
@@ -381,20 +369,19 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   photoRow: {
-    flexDirection: 'row',
-    gap: 10,
     marginTop: 10,
   },
   photoSlot: {
-    flex: 1,
-    aspectRatio: 1,
+    width: 80,
+    height: 80,
     borderRadius: 12,
     overflow: 'visible',
     position: 'relative',
+    marginRight: 10,
   },
   photoImg: {
-    width: '100%',
-    height: '100%',
+    width: 80,
+    height: 80,
     borderRadius: 12,
   },
   photoDelete: {
@@ -405,8 +392,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   photoSlotEmpty: {
-    flex: 1,
-    aspectRatio: 1,
+    width: 80,
+    height: 80,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: colors.primaryLight,

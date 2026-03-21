@@ -43,16 +43,17 @@ export function addDays(date: Date, n: number): Date {
 }
 
 /** Returns all day cells for a monthly view (including padding from prev/next month) */
-export function getMonthDays(year: number, month: number, specialDates: SpecialDate[] = []): DayInfo[] {
+export function getMonthDays(year: number, month: number, specialDates: SpecialDate[] = [], weekStartDay: number = 1): DayInfo[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
 
-  // 月曜始まり: 最初の月曜日から開始
-  const startOffset = (firstDay.getDay() + 6) % 7; // Mon=0, Tue=1, ..., Sun=6
+  // weekStartDay: 0=日曜, 1=月曜
+  const startOffset = (firstDay.getDay() - weekStartDay + 7) % 7;
   const start = new Date(year, month, 1 - startOffset);
 
-  // 日曜日で終わる
-  const endOffset = (7 - lastDay.getDay()) % 7;
+  // 週の最終曜日で終わる
+  const lastDayOfWeek = (weekStartDay + 6) % 7;
+  const endOffset = (lastDayOfWeek - lastDay.getDay() + 7) % 7;
   const end = new Date(year, month + 1, endOffset);
 
   const days: DayInfo[] = [];
@@ -83,14 +84,15 @@ export function getMonthDays(year: number, month: number, specialDates: SpecialD
   return days;
 }
 
-/** Returns 7 days starting from the Monday of the week containing `date` */
-export function getWeekDays(date: Date, specialDates: SpecialDate[] = []): DayInfo[] {
+/** Returns 7 days starting from the weekStartDay of the week containing `date` */
+export function getWeekDays(date: Date, specialDates: SpecialDate[] = [], weekStartDay: number = 1): DayInfo[] {
   const day = date.getDay(); // 0=Sun
-  const monday = addDays(date, -((day + 6) % 7)); // start from Monday
+  const startOffset = (day - weekStartDay + 7) % 7;
+  const weekStart = addDays(date, -startOffset);
   const days: DayInfo[] = [];
 
   for (let i = 0; i < 7; i++) {
-    const cur = addDays(monday, i);
+    const cur = addDays(weekStart, i);
     const dateString = formatDate(cur);
     const special = specialDates.find(
       (s) => s.month === cur.getMonth() + 1 && s.day === cur.getDate()
@@ -112,6 +114,14 @@ export function getWeekDays(date: Date, specialDates: SpecialDate[] = []): DayIn
 export const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 export const WEEKDAY_LABELS_MON_FIRST = ['月', '火', '水', '木', '金', '土', '日'];
 export const WEEKDAY_LABELS_LONG = ['日曜', '月曜', '火曜', '水曜', '木曜', '金曜', '土曜'];
+
+/** weekStartDay(0=日, 1=月) に応じた7曜日ラベルと曜日番号を返す */
+export function getWeekdayLabels(weekStartDay: number = 1): { label: string; day: number }[] {
+  return Array.from({ length: 7 }, (_, i) => {
+    const day = (weekStartDay + i) % 7;
+    return { label: WEEKDAY_LABELS[day], day };
+  });
+}
 
 export function formatMonthDay(dateStr: string): string {
   const d = parseDate(dateStr);

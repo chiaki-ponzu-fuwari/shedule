@@ -28,6 +28,8 @@ export default function SettingsScreen() {
   const removeRecurring = useCalendarStore((s) => s.removeRecurring);
   const specialDates = useCalendarStore((s) => s.specialDates);
   const removeSpecialDate = useCalendarStore((s) => s.removeSpecialDate);
+  const weekStartDay = useCalendarStore((s) => s.weekStartDay);
+  const setWeekStartDay = useCalendarStore((s) => s.setWeekStartDay);
 
   const [addStampVisible, setAddStampVisible] = useState(false);
   const [editingStamp, setEditingStamp] = useState<typeof stamps[0] | undefined>(undefined);
@@ -87,6 +89,27 @@ export default function SettingsScreen() {
                   <Ionicons name="pencil-outline" size={14} color={colors.textLight} />
                 </TouchableOpacity>
               )}
+            </View>
+          </View>
+        </View>
+
+        {/* Calendar Settings */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>カレンダー設定</Text>
+          <View style={styles.card}>
+            <Text style={[styles.subLabel, { marginTop: 0, marginBottom: 12 }]}>週の始まり</Text>
+            <View style={styles.weekStartRow}>
+              {([{ label: '月曜日始まり', value: 1 }, { label: '日曜日始まり', value: 0 }] as const).map((opt) => (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.weekStartBtn, weekStartDay === opt.value && styles.weekStartBtnActive]}
+                  onPress={() => { Haptics.selectionAsync(); setWeekStartDay(opt.value); }}
+                >
+                  <Text style={[styles.weekStartBtnText, weekStartDay === opt.value && styles.weekStartBtnTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
         </View>
@@ -392,6 +415,17 @@ const styles = StyleSheet.create({
   aboutRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.divider },
   aboutLabel: { fontSize: 14, color: colors.textSecondary, fontWeight: '500' },
   aboutValue: { fontSize: 14, color: colors.text, fontWeight: '700' },
+  weekStartRow: { flexDirection: 'row', gap: 10 },
+  weekStartBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: '#F5EFF5', alignItems: 'center',
+    borderWidth: 2, borderColor: 'transparent',
+  },
+  weekStartBtnActive: {
+    backgroundColor: '#FFE4F0', borderColor: colors.primary,
+  },
+  weekStartBtnText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  weekStartBtnTextActive: { color: colors.primary, fontWeight: '800' },
   imageStampGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   imageStampItem: { position: 'relative' },
   imageStampImg: { width: 56, height: 56, borderRadius: 14 },

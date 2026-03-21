@@ -9,10 +9,8 @@ import * as Haptics from 'expo-haptics';
 import { DayCell } from './DayCell';
 import { useCalendarStore } from '../../store/calendarStore';
 import { useStampStore } from '../../store/stampStore';
-import { getMonthDays, getMonthLabel, addMonths, WEEKDAY_LABELS_MON_FIRST } from '../../utils/dateUtils';
+import { getMonthDays, getMonthLabel, addMonths, getWeekdayLabels } from '../../utils/dateUtils';
 import { colors } from '../../constants/colors';
-
-const WEEKDAYS = WEEKDAY_LABELS_MON_FIRST; // ['月','火','水','木','金','土','日']
 
 interface Props {
   currentMonth: Date;
@@ -25,11 +23,13 @@ interface Props {
 export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthChange, onPickerOpen }: Props) {
   const entries = useCalendarStore((s) => s.entries);
   const specialDates = useCalendarStore((s) => s.specialDates);
+  const weekStartDay = useCalendarStore((s) => s.weekStartDay);
   const getStamp = useStampStore((s) => s.getStamp);
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
-  const days = getMonthDays(year, month, specialDates);
+  const days = getMonthDays(year, month, specialDates, weekStartDay);
+  const weekdays = getWeekdayLabels(weekStartDay);
 
   // 左右スワイプで月移動
   const swipeStartX = useRef(0);
@@ -85,13 +85,13 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
 
       {/* ── 曜日ヘッダー ── */}
       <View style={styles.weekHeader}>
-        {WEEKDAYS.map((label, i) => (
-          <View key={label} style={styles.weekHeaderCell}>
+        {weekdays.map(({ label, day }) => (
+          <View key={day} style={styles.weekHeaderCell}>
             <Text
               style={[
                 styles.weekHeaderText,
-                i === 5 && { color: colors.saturday },
-                i === 6 && { color: colors.sunday },
+                day === 6 && { color: colors.saturday },
+                day === 0 && { color: colors.sunday },
               ]}
             >
               {label}

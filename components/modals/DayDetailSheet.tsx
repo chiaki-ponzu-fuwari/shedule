@@ -74,6 +74,7 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
   const setMainStamp = useCalendarStore((s) => s.setMainStamp);
   const setMiniStamp = useCalendarStore((s) => s.setMiniStamp);
   const setNotes = useCalendarStore((s) => s.setNotes);
+  const setNoteItems = useCalendarStore((s) => s.setNoteItems);
   const setStartTime = useCalendarStore((s) => s.setStartTime);
   const setEndTime = useCalendarStore((s) => s.setEndTime);
   const setNotification = useCalendarStore((s) => s.setNotification);
@@ -88,14 +89,21 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
   const miniStamps = stamps.filter((s) => (s.isMain === false || s.isMain === undefined) && s.isEnabled !== false && !s.isImageStamp);
   const displayStamps = activePos === 'main' ? mainStamps : miniStamps;
 
-  const [notesVal, setNotesVal] = useState('');
+  const [noteItems, setNoteItemsLocal] = useState<string[]>([]);
   const [startVal, setStartVal] = useState('');
   const [endVal, setEndVal] = useState('');
 
   useEffect(() => {
     if (visible) {
       setActivePos('main');
-      setNotesVal(entry?.notes ?? '');
+      // noteItems がある場合はそれを使い、古い notes があれば移行
+      if (entry?.noteItems !== undefined) {
+        setNoteItemsLocal(entry.noteItems);
+      } else if (entry?.notes) {
+        setNoteItemsLocal([entry.notes]);
+      } else {
+        setNoteItemsLocal([]);
+      }
       setStartVal(entry?.startTime ?? '');
       setEndVal(entry?.endTime ?? '');
       Animated.spring(slideAnim, {
@@ -326,21 +334,59 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                     </View>
                   </View>
 
-                  {/* ─ メモ ─ */}
+                  {/* ─ メモ・予定（複数） ─ */}
                   <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>メモ・予定</Text>
-                    <TextInput
-                      style={styles.notesInput}
-                      value={notesVal}
-                      onChangeText={setNotesVal}
-                      placeholder="予定を入力…"
-                      placeholderTextColor={colors.textLight}
-                      multiline
-                    />
+                    <View style={styles.noteHeader}>
+                      <Text style={styles.sectionLabel}>メモ・予定</Text>
+                      <TouchableOpacity
+                        style={styles.noteAddBtn}
+                        onPress={() => {
+                          Haptics.selectionAsync();
+                          setNoteItemsLocal((prev) => [...prev, '']);
+                        }}
+                      >
+                        <Text style={styles.noteAddBtnText}>＋ 追加</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {noteItems.map((item, idx) => (
+                      <View key={idx} style={styles.noteItemRow}>
+                        <TextInput
+                          style={styles.noteItemInput}
+                          value={item}
+                          onChangeText={(text) => {
+                            const next = [...noteItems];
+                            next[idx] = text;
+                            setNoteItemsLocal(next);
+                          }}
+                          placeholder="予定を入力…"
+                          placeholderTextColor={colors.textLight}
+                          multiline
+                        />
+                        <TouchableOpacity
+                          style={styles.noteDeleteBtn}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            setNoteItemsLocal((prev) => prev.filter((_, i) => i !== idx));
+                          }}
+                        >
+                          <Ionicons name="close-circle" size={20} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    {noteItems.length === 0 && (
+                      <TouchableOpacity
+                        style={styles.noteEmptyBtn}
+                        onPress={() => { Haptics.selectionAsync(); setNoteItemsLocal(['']); }}
+                      >
+                        <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                        <Text style={styles.noteEmptyBtnText}>メモ・予定を追加</Text>
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                       style={styles.saveBtn}
                       onPress={() => {
-                        setNotes(date, notesVal);
+                        const filtered = noteItems.filter((s) => s.trim() !== '');
+                        setNoteItems(date, filtered);
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                         onClose();
                       }}
@@ -529,12 +575,29 @@ const styles = StyleSheet.create({
   timeInput: { fontSize: 20, fontWeight: '700', color: colors.text, textAlign: 'center' },
   timeSep: { fontSize: 16, color: colors.textLight, fontWeight: '600' },
 
-  // メモ
-  notesInput: {
-    backgroundColor: '#FFFFFF', borderRadius: 12, padding: 12,
-    fontSize: 14, color: colors.text, minHeight: 80,
-    textAlignVertical: 'top',
+  // メモ・予定
+  noteHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8,
   },
+  noteAddBtn: {
+    backgroundColor: '#FFE4F0', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  noteAddBtnText: { fontSize: 12, fontWeight: '700', color: colors.primary },
+  noteItemRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 8,
+  },
+  noteItemInput: {
+    flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 12,
+    fontSize: 14, color: colors.text, minHeight: 44, textAlignVertical: 'top',
+  },
+  noteDeleteBtn: { paddingTop: 12 },
+  noteEmptyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FFFFFF', borderRadius: 12, padding: 12,
+    borderWidth: 1.5, borderColor: colors.primaryLight, borderStyle: 'dashed',
+    marginBottom: 8,
+  },
+  noteEmptyBtnText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
   saveBtn: {
     marginTop: 8, backgroundColor: colors.primary,
     borderRadius: 10, paddingVertical: 10, alignItems: 'center',

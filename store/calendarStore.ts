@@ -8,11 +8,16 @@ interface CalendarState {
   entries: Record<string, DayEntry>;
   recurringSchedules: RecurringSchedule[];
   specialDates: SpecialDate[];
+  weekStartDay: 0 | 1; // 0=日曜始まり, 1=月曜始まり
+
+  // Settings
+  setWeekStartDay: (day: 0 | 1) => void;
 
   // Entry mutations
   setMainStamp: (date: string, stampId: string | undefined) => void;
   setMiniStamp: (date: string, position: 'left' | 'right', stampId: string | undefined) => void;
   setNotes: (date: string, notes: string) => void;
+  setNoteItems: (date: string, items: string[]) => void;
   setPrivacyLevel: (date: string, level: PrivacyLevel) => void;
   setStartTime: (date: string, time: string) => void;
   setEndTime: (date: string, time: string) => void;
@@ -47,6 +52,9 @@ export const useCalendarStore = create<CalendarState>()(
       entries: {},
       recurringSchedules: [],
       specialDates: [],
+      weekStartDay: 1,
+
+      setWeekStartDay: (day) => set({ weekStartDay: day }),
 
       getEntry: (date) => get().entries[date],
 
@@ -85,6 +93,18 @@ export const useCalendarStore = create<CalendarState>()(
               ...emptyEntry(date),
               ...state.entries[date],
               notes,
+            },
+          },
+        })),
+
+      setNoteItems: (date, items) =>
+        set((state) => ({
+          entries: {
+            ...state.entries,
+            [date]: {
+              ...emptyEntry(date),
+              ...state.entries[date],
+              noteItems: items,
             },
           },
         })),
