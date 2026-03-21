@@ -196,10 +196,8 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
     >
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.overlay}>
-          <Animated.View
-            style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
-            onStartShouldSetResponder={() => true}
-          >
+          <TouchableWithoutFeedback onPress={() => {}}>
+            <Animated.View style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}>
               <View style={{ flex: 1 }}>
                 {/* Handle */}
                 <View style={styles.handle} />
@@ -430,6 +428,7 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                 </ScrollView>
               </View>
             </Animated.View>
+          </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
 
