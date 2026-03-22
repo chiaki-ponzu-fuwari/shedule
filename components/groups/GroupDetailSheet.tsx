@@ -19,6 +19,8 @@ const hapticNotify = () => { if (Platform.OS !== 'web') Haptics.notificationAsyn
 
 type Tab = 'info' | 'schedule';
 
+const DEFAULT_SHARING: GroupSharingSettings = { shareMain: true, shareMini: false, shareNotes: false };
+
 interface Props {
   group: Group;
   visible: boolean;
@@ -33,7 +35,7 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
   const [syncing, setSyncing] = useState(false);
 
   const updateSharedMemo = useGroupStore((s) => s.updateSharedMemo);
-  const sharingSettings = useGroupStore((s) => s.sharingSettings[group.id] ?? { shareMain: true, shareMini: false, shareNotes: false });
+  const sharingSettings = useGroupStore((s) => s.sharingSettings[group.id] ?? DEFAULT_SHARING);
   const setSharingSettings = useGroupStore((s) => s.setSharingSettings);
   const syncMySchedule = useGroupStore((s) => s.syncMySchedule);
   const fetchGroupSchedules = useGroupStore((s) => s.fetchGroupSchedules);
