@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Platform } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import { colors } from '../../constants/colors';
 
 export const WHEEL_ITEM_H = 44;
@@ -75,7 +75,7 @@ export function WheelPicker({ items, selectedIndex, onChange, width = 88, format
 
   return (
     <View style={[styles.container, { width }]}>
-      <View style={styles.highlight} pointerEvents="none" />
+      <View style={[styles.highlight, { pointerEvents: 'none' }]} />
 
       <ScrollView
         ref={scrollRef}
@@ -119,8 +119,8 @@ export function WheelPicker({ items, selectedIndex, onChange, width = 88, format
         })}
       </ScrollView>
 
-      <View style={styles.fadeTop} pointerEvents="none" />
-      <View style={styles.fadeBottom} pointerEvents="none" />
+      <View style={[styles.fadeTop, { pointerEvents: 'none' }]} />
+      <View style={[styles.fadeBottom, { pointerEvents: 'none' }]} />
     </View>
   );
 }
@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
     left: 4,
     right: 4,
     height: WHEEL_ITEM_H,
-    backgroundColor: '#EDE9FE',
+    backgroundColor: '#EFF6FF',
     borderRadius: 12,
     zIndex: 0,
   },

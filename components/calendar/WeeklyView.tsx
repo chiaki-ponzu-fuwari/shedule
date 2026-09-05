@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions,
-  TextInput, Image, Alert,
+  TextInput, Alert, Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { compressPickedImageUri } from '../../utils/compressPickedImage';
 import { useCalendarStore } from '../../store/calendarStore';
 import { useStampStore } from '../../store/stampStore';
-import { getWeekDays, addDays, formatMonthDay, formatFullDate } from '../../utils/dateUtils';
+import {
+  getWeekDays, addDays, formatFullDate, formatShortDateParts, formatDate, parseDate, startOfWeekForDate,
+} from '../../utils/dateUtils';
 import { colors } from '../../constants/colors';
+import { useTranslation } from '../../constants/i18n';
 import { StampBadge } from '../ui/StampBadge';
+import { HorizontalDateStrip } from '../ui/HorizontalDateStrip';
+import { PersonalMediaImage } from '../common/PersonalMediaImage';
 
 const SCREEN_W = Dimensions.get('window').width;
 const COL_W = Math.floor((SCREEN_W - 40) / 7);
@@ -24,6 +30,7 @@ interface Props {
 }
 
 export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange }: Props) {
+  const { t, locale } = useTranslation();
   const entries = useCalendarStore((s) => s.entries);
   const specialDates = useCalendarStore((s) => s.specialDates);
   const recurringSchedules = useCalendarStore((s) => s.recurringSchedules);
@@ -31,6 +38,14 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
   const getStamp = useStampStore((s) => s.getStamp);
   const setDiary = useCalendarStore((s) => s.setDiary);
   const setDiaryPhotos = useCalendarStore((s) => s.setDiaryPhotos);
+  const setDiaryConfirmed = useCalendarStore((s) => s.setDiaryConfirmed);
+
+  // スロットごとに表示するstampIdを決定
+  const getDisplayStampId = (entry: typeof entries[string] | undefined, position: 'main' | 'mini-left' | 'mini-right') => {
+    if (position === 'main') return entry?.mainStampId;
+    if (position === 'mini-left') return entry?.miniStamps?.left;
+    return entry?.miniStamps?.right;
+  };
 
   // 曜日から繰り返し予定を取得
   const getRecurringForDay = (dayOfWeek: number) =>
@@ -43,34 +58,62 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
   const selectedEntry = selectedDate ? entries[selectedDate] : undefined;
   const [diaryText, setDiaryText] = useState(selectedEntry?.diary ?? '');
 
-  // 選択日の繰り返し予定・特別日
+  // 選択日の有効スタンプ（バンドに実際表示されるもの）・特別日
   const selDate = selectedDate ? new Date(selectedDate + 'T00:00:00') : null;
-  const selRecurring = selDate ? getRecurringForDay(selDate.getDay()) : [];
+  const selEffectiveStamps = selDate
+    ? (['main', 'mini-left', 'mini-right'] as const)
+        .map((pos) => {
+          const id = getDisplayStampId(selectedEntry, pos);
+          return id ? getStamp(id) : undefined;
+        })
+        .filter((s): s is NonNullable<typeof s> => !!s)
+        .filter((s, i, arr) => arr.findIndex((x) => x.id === s.id) === i)
+    : [];
   const selSpecials = selDate ? getSpecialForDate(selDate.getMonth() + 1, selDate.getDate()) : [];
+
+  const [lightboxUri, setLightboxUri] = useState<string | null>(null);
 
   useEffect(() => {
     setDiaryText(selectedDate ? (entries[selectedDate]?.diary ?? '') : '');
   }, [selectedDate]);
 
+  const isConfirmed = !!selectedEntry?.diaryConfirmed;
+
   const handlePickPhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
+    if (!selectedDate) return;
+    const current = selectedEntry?.diaryPhotos ?? [];
+    if (current.length >= 2) {
+      Alert.alert(t('weekly.photoLimitTitle'), t('weekly.photoLimitBody'));
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets[0]?.uri && selectedDate) {
-      const current = selectedEntry?.diaryPhotos ?? [];
-      setDiaryPhotos(selectedDate, [...current, result.assets[0].uri]);
+    if (!result.canceled && result.assets[0]?.uri) {
+      const uri = await compressPickedImageUri(result.assets[0].uri);
+      setDiaryPhotos(selectedDate, [...current, uri]);
     }
+  };
+
+  const handleConfirm = () => {
+    if (!selectedDate) return;
+    setDiary(selectedDate, diaryText);
+    setDiaryConfirmed(selectedDate, true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleEdit = () => {
+    if (!selectedDate) return;
+    setDiaryConfirmed(selectedDate, false);
   };
 
   const handleRemovePhoto = (index: number) => {
     if (!selectedDate) return;
-    Alert.alert('写真を削除', 'この写真を削除しますか？', [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: '削除', style: 'destructive', onPress: () => {
+    Alert.alert(t('weekly.photoDeleteTitle'), t('weekly.photoDeleteMsg'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.delete'), style: 'destructive', onPress: () => {
         const current = selectedEntry?.diaryPhotos ?? [];
         setDiaryPhotos(selectedDate, current.filter((_, i) => i !== index));
       }},
@@ -81,30 +124,40 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
   const weekStart = days[0];
   const weekEnd = days[6];
 
-  const weekLabel = `${weekStart.date.getMonth() + 1}/${weekStart.date.getDate()} 〜 ${weekEnd.date.getMonth() + 1}/${weekEnd.date.getDate()}`;
+  const rangeSep = locale === 'en' ? ' – ' : ' 〜 ';
+  const weekLabel = `${weekStart.date.getMonth() + 1}/${weekStart.date.getDate()}${rangeSep}${weekEnd.date.getMonth() + 1}/${weekEnd.date.getDate()}`;
 
   return (
     <View style={styles.container}>
       {/* Week header */}
       <LinearGradient
-        colors={['#FFE4F0', '#EDE9FE']}
+        colors={['#DBEAFE', '#EFF6FF']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
-        style={styles.header}
+        style={styles.headerGradient}
       >
-        <TouchableOpacity
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onWeekChange(addDays(currentDate, -7)); }}
-          style={styles.navBtn}
-        >
-          <Ionicons name="chevron-back" size={22} color={colors.primary} />
-        </TouchableOpacity>
-        <Text style={styles.weekLabel}>{weekLabel}</Text>
-        <TouchableOpacity
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onWeekChange(addDays(currentDate, 7)); }}
-          style={styles.navBtn}
-        >
-          <Ionicons name="chevron-forward" size={22} color={colors.primary} />
-        </TouchableOpacity>
+        <View style={styles.headerTop}>
+          <TouchableOpacity
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onWeekChange(addDays(currentDate, -7)); }}
+            style={styles.navBtn}
+          >
+            <Ionicons name="chevron-back" size={22} color={colors.primary} />
+          </TouchableOpacity>
+          <Text style={styles.weekLabel}>{weekLabel}</Text>
+          <TouchableOpacity
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onWeekChange(addDays(currentDate, 7)); }}
+            style={styles.navBtn}
+          >
+            <Ionicons name="chevron-forward" size={22} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+        <HorizontalDateStrip
+          selectedDate={selectedDate ?? formatDate(currentDate)}
+          onDateChange={(ds) => {
+            onDayPress(ds);
+            onWeekChange(startOfWeekForDate(parseDate(ds), weekStartDay));
+          }}
+        />
       </LinearGradient>
 
       {/* Day columns + diary */}
@@ -112,14 +165,16 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
         <View style={styles.columns}>
           {days.map((day) => {
             const entry = entries[day.dateString];
-            const mainStamp = entry?.mainStampId ? getStamp(entry.mainStampId) : undefined;
-            const leftMini = entry?.miniStamps?.left ? getStamp(entry.miniStamps.left) : undefined;
-            const rightMini = entry?.miniStamps?.right ? getStamp(entry.miniStamps.right) : undefined;
+            const mainId = getDisplayStampId(entry, 'main');
+            const leftId = getDisplayStampId(entry, 'mini-left');
+            const rightId = getDisplayStampId(entry, 'mini-right');
+            const mainStamp = mainId ? getStamp(mainId) : undefined;
+            const leftMini = leftId ? getStamp(leftId) : undefined;
+            const rightMini = rightId ? getStamp(rightId) : undefined;
             const isSelected = selectedDate === day.dateString;
-            const dayRecurring = getRecurringForDay(day.date.getDay());
             const daySpecials = getSpecialForDate(day.date.getMonth() + 1, day.date.getDate());
 
-            const DAY_LABELS_SHORT = ['日', '月', '火', '水', '木', '金', '土'];
+            const wdLabel = formatShortDateParts(day.dateString, locale).day;
 
             return (
               <TouchableOpacity
@@ -136,7 +191,7 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
                     day.isSaturday && styles.saturdayText,
                   ]}
                 >
-                  {DAY_LABELS_SHORT[day.date.getDay()]}
+                  {wdLabel}
                 </Text>
 
                 {/* Date number */}
@@ -146,7 +201,16 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
                   </Text>
                 </View>
 
-                {/* Mini stamps */}
+                {/* Main stamp */}
+                {mainStamp ? (
+                  <View style={[styles.mainBand, { backgroundColor: mainStamp.bgColor }]}>
+                    <Text style={[styles.mainBandText, { color: mainStamp.textColor }]}>{mainStamp.text}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.mainBandEmpty} />
+                )}
+
+                {/* Mini stamps（メイン帯の下） */}
                 <View style={styles.miniRow}>
                   {leftMini && (
                     <View style={[styles.miniPill, { backgroundColor: leftMini.bgColor }]}>
@@ -159,32 +223,6 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
                     </View>
                   )}
                 </View>
-
-                {/* Main stamp（エントリー or 繰り返し予定） */}
-                {mainStamp ? (
-                  <View style={[styles.mainBand, { backgroundColor: mainStamp.bgColor }]}>
-                    <Text style={[styles.mainBandText, { color: mainStamp.textColor }]}>{mainStamp.text}</Text>
-                  </View>
-                ) : dayRecurring.length > 0 ? (
-                  <View style={[styles.mainBand, { backgroundColor: getStamp(dayRecurring[0].stampId)?.bgColor ?? colors.primaryLight }]}>
-                    <Text style={[styles.mainBandText, { color: getStamp(dayRecurring[0].stampId)?.textColor ?? '#FFFFFF' }]} numberOfLines={1}>
-                      {getStamp(dayRecurring[0].stampId)?.text ?? ''}
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={styles.mainBandEmpty} />
-                )}
-
-                {/* 繰り返し予定（2件目以降）のアイコン */}
-                {dayRecurring.slice(1).map((rs) => {
-                  const s = getStamp(rs.stampId);
-                  if (!s) return null;
-                  return (
-                    <View key={rs.id} style={[styles.recurringChip, { backgroundColor: s.bgColor }]}>
-                      <Text style={[styles.recurringChipText, { color: s.textColor }]} numberOfLines={1}>{s.text}</Text>
-                    </View>
-                  );
-                })}
 
                 {/* 特別日アイコン */}
                 {daySpecials.map((sd) => (
@@ -205,20 +243,30 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
         {/* ── 日記・写真セクション ── */}
         {selectedDate && (
           <View style={styles.diarySection}>
-            <Text style={styles.diaryDateLabel}>{formatFullDate(selectedDate)}</Text>
+            {/* ヘッダー：日付 + 確定/編集ボタン */}
+            <View style={styles.diaryHeader}>
+              <Text style={styles.diaryDateLabel}>{formatFullDate(selectedDate, locale)}</Text>
+              {isConfirmed ? (
+                <TouchableOpacity style={styles.editBtn} onPress={handleEdit}>
+                  <Ionicons name="pencil" size={13} color={colors.primary} />
+                  <Text style={styles.editBtnText}>{t('weekly.edit')}</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirm}>
+                  <Ionicons name="checkmark" size={13} color="#FFFFFF" />
+                  <Text style={styles.confirmBtnText}>{t('weekly.confirm')}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
-            {/* 繰り返し予定・特別日チップ */}
-            {(selRecurring.length > 0 || selSpecials.length > 0) && (
+            {/* スタンプ・特別日チップ */}
+            {(selEffectiveStamps.length > 0 || selSpecials.length > 0) && (
               <View style={styles.scheduleChips}>
-                {selRecurring.map((rs) => {
-                  const s = getStamp(rs.stampId);
-                  if (!s) return null;
-                  return (
-                    <View key={rs.id} style={[styles.scheduleChip, { backgroundColor: s.bgColor }]}>
-                      <Text style={[styles.scheduleChipText, { color: s.textColor }]}>{s.text}</Text>
-                    </View>
-                  );
-                })}
+                {selEffectiveStamps.map((s) => (
+                  <View key={s.id} style={[styles.scheduleChip, { backgroundColor: s.bgColor }]}>
+                    <Text style={[styles.scheduleChipText, { color: s.textColor }]}>{s.text}</Text>
+                  </View>
+                ))}
                 {selSpecials.map((sd) => (
                   <View key={sd.id} style={[styles.scheduleChip, { backgroundColor: sd.color + '22' }]}>
                     <Ionicons name={(sd.emoji as any) || 'gift-outline'} size={12} color={sd.color} />
@@ -228,52 +276,77 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
               </View>
             )}
 
-            {/* 日記入力 */}
-            <TextInput
-              style={styles.diaryInput}
-              value={diaryText}
-              onChangeText={setDiaryText}
-              onBlur={() => setDiary(selectedDate, diaryText)}
-              placeholder="今日の日記を書く…"
-              placeholderTextColor={colors.textLight}
-              multiline
-              textAlignVertical="top"
-            />
+            {/* 日記 */}
+            {isConfirmed ? (
+              <View style={styles.diaryReadOnly}>
+                <Text style={styles.diaryReadOnlyText}>
+                  {selectedEntry?.diary || t('weekly.noDiary')}
+                </Text>
+              </View>
+            ) : (
+              <TextInput
+                style={styles.diaryInput}
+                value={diaryText}
+                onChangeText={setDiaryText}
+                onBlur={() => setDiary(selectedDate, diaryText)}
+                placeholder={t('weekly.diaryPlaceholder')}
+                placeholderTextColor={colors.textLight}
+                multiline
+                textAlignVertical="top"
+              />
+            )}
 
             {/* 写真 */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoRow}>
               {(selectedEntry?.diaryPhotos ?? []).map((uri, i) => (
                 <View key={i} style={styles.photoSlot}>
-                  <Image source={{ uri }} style={styles.photoImg} />
-                  <TouchableOpacity style={styles.photoDelete} onPress={() => handleRemovePhoto(i)}>
-                    <Ionicons name="close-circle" size={20} color="#EF4444" />
+                  <TouchableOpacity onPress={() => isConfirmed && setLightboxUri(uri)} activeOpacity={isConfirmed ? 0.7 : 1}>
+                    <PersonalMediaImage domain="diary" uri={uri} style={styles.photoImg} />
                   </TouchableOpacity>
+                  {!isConfirmed && (
+                    <TouchableOpacity style={styles.photoDelete} onPress={() => handleRemovePhoto(i)}>
+                      <Ionicons name="close-circle" size={20} color="#EF4444" />
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))}
-              <TouchableOpacity
-                style={styles.photoSlotEmpty}
-                onPress={() => { Haptics.selectionAsync(); handlePickPhoto(); }}
-              >
-                <Ionicons name="camera-outline" size={24} color={colors.primaryLight} />
-                <Text style={styles.photoAddLabel}>追加</Text>
-              </TouchableOpacity>
+              {!isConfirmed && (selectedEntry?.diaryPhotos ?? []).length < 2 && (
+                <TouchableOpacity
+                  style={styles.photoSlotEmpty}
+                  onPress={() => { Haptics.selectionAsync(); handlePickPhoto(); }}
+                >
+                  <Ionicons name="camera-outline" size={24} color={colors.primaryLight} />
+                  <Text style={styles.photoAddLabel}>{t('settings.add')}</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </View>
         )}
         <View style={{ height: 32 }} />
       </ScrollView>
+
+      {/* 写真拡大ライトボックス */}
+      <Modal visible={!!lightboxUri} transparent animationType="fade" onRequestClose={() => setLightboxUri(null)}>
+        <TouchableOpacity style={styles.lightboxOverlay} activeOpacity={1} onPress={() => setLightboxUri(null)}>
+          {lightboxUri && <PersonalMediaImage domain="diary" uri={lightboxUri} style={styles.lightboxImage} resizeMode="contain" />}
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: {
+  headerGradient: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  headerTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    marginBottom: 4,
   },
   navBtn: {
     width: 36, height: 36, alignItems: 'center', justifyContent: 'center',
@@ -296,7 +369,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   columnSelected: {
-    backgroundColor: '#FFE4F0',
+    backgroundColor: '#DBEAFE',
     borderWidth: 2,
     borderColor: colors.primary,
   },
@@ -313,7 +386,7 @@ const styles = StyleSheet.create({
   dateNum: { fontSize: 12, fontWeight: '700', color: colors.text },
   todayNum: { color: '#FFFFFF' },
   miniRow: {
-    width: '100%', alignItems: 'center', marginBottom: 2, gap: 1,
+    width: '100%', alignItems: 'center', marginTop: 2, gap: 1,
   },
   miniPill: {
     width: '88%', borderRadius: 3, alignItems: 'center', justifyContent: 'center',
@@ -322,9 +395,9 @@ const styles = StyleSheet.create({
   miniText: { fontSize: 8, fontWeight: '800' },
   mainBand: {
     width: '88%', borderRadius: 4, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 3, marginTop: 1,
+    paddingVertical: 3, marginTop: 2,
   },
-  mainBandEmpty: { width: '88%', height: 18, marginTop: 1 },
+  mainBandEmpty: { width: '88%', height: 18, marginTop: 2 },
   mainBandText: { fontSize: 11, fontWeight: '800' },
   specialDot: { width: 5, height: 5, borderRadius: 3, marginTop: 2 },
   specialIconRow: { marginTop: 2, alignItems: 'center' },
@@ -347,11 +420,48 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 14,
-    shadowColor: '#A78BFA',
+    shadowColor: '#3B82F6',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 2,
+  },
+  diaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  confirmBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: colors.primary,
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  confirmBtnText: { fontSize: 12, fontWeight: '700', color: '#FFFFFF' },
+  editBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#DBEAFE',
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  editBtnText: { fontSize: 12, fontWeight: '700', color: colors.primary },
+  diaryReadOnly: {
+    backgroundColor: '#F8F4FC',
+    borderRadius: 10,
+    padding: 10,
+    minHeight: 80,
+  },
+  diaryReadOnlyText: {
+    fontSize: 14, color: colors.text, lineHeight: 20,
+  },
+  lightboxOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxImage: {
+    width: '100%',
+    height: '80%',
   },
   diaryDateLabel: {
     fontSize: 12,
@@ -372,16 +482,16 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   photoSlot: {
-    width: 80,
-    height: 80,
+    width: (SCREEN_W - 44 - 10) / 2,
+    height: (SCREEN_W - 44 - 10) / 2,
     borderRadius: 12,
     overflow: 'visible',
     position: 'relative',
     marginRight: 10,
   },
   photoImg: {
-    width: 80,
-    height: 80,
+    width: (SCREEN_W - 44 - 10) / 2,
+    height: (SCREEN_W - 44 - 10) / 2,
     borderRadius: 12,
   },
   photoDelete: {
@@ -392,8 +502,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   photoSlotEmpty: {
-    width: 80,
-    height: 80,
+    width: (SCREEN_W - 44 - 10) / 2,
+    height: (SCREEN_W - 44 - 10) / 2,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: colors.primaryLight,

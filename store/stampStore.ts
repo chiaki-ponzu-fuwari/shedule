@@ -3,9 +3,19 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stamp } from '../types';
 import { ALL_DEFAULT_STAMPS } from '../constants/defaultStamps';
+import {
+  createOwnerStateStorage,
+  getPersonalOwnerStorage,
+  type OwnerSwitchTarget,
+} from '../lib/account/namespacedStorage';
 
-interface StampState {
+export interface StampOwnerState {
   stamps: Stamp[];
+}
+
+interface StampState extends StampOwnerState {
+  replaceState: (state: StampOwnerState) => void;
+  clearForOwnerSwitch: () => void;
   addStamp: (stamp: Stamp) => void;
   addImageStamp: (uri: string) => Stamp;
   removeStamp: (id: string) => void;
@@ -18,10 +28,21 @@ interface StampState {
   imageStamps: () => Stamp[];
 }
 
+function defaultStampOwnerState(): StampOwnerState {
+  return { stamps: ALL_DEFAULT_STAMPS.map((stamp) => ({ ...stamp })) };
+}
+
+const stampOwnerStorage = getPersonalOwnerStorage(AsyncStorage);
+
 export const useStampStore = create<StampState>()(
   persist(
     (set, get) => ({
-      stamps: ALL_DEFAULT_STAMPS,
+      ...defaultStampOwnerState(),
+
+      replaceState: (state) =>
+        set({ stamps: state.stamps.map((stamp) => ({ ...stamp })) }),
+
+      clearForOwnerSwitch: () => set(defaultStampOwnerState()),
 
       addStamp: (stamp) =>
         set((state) => ({ stamps: [...state.stamps, stamp] })),
@@ -58,7 +79,7 @@ export const useStampStore = create<StampState>()(
           ),
         })),
 
-      resetToDefaults: () => set({ stamps: ALL_DEFAULT_STAMPS }),
+      resetToDefaults: () => set(defaultStampOwnerState()),
 
       getStamp: (id) => get().stamps.find((s) => s.id === id),
 
@@ -72,8 +93,20 @@ export const useStampStore = create<StampState>()(
         get().stamps.filter((s) => s.isImageStamp === true),
     }),
     {
-      name: 'stamp-storage-v8',
-      storage: createJSONStorage(() => AsyncStorage),
+      name: 'stamps',
+      storage: createJSONStorage(() => createOwnerStateStorage(stampOwnerStorage)),
     }
   )
 );
+
+export function createStampOwnerSwitchTarget(): OwnerSwitchTarget<StampOwnerState> {
+  return {
+    snapshot: () => ({
+      stamps: useStampStore.getState().stamps.map((stamp) => ({ ...stamp })),
+    }),
+    clearForOwnerSwitch: () => useStampStore.getState().clearForOwnerSwitch(),
+    replaceState: (state) => useStampStore.getState().replaceState(state),
+    rehydrate: () => useStampStore.persist.rehydrate(),
+    hasHydrated: () => useStampStore.persist.hasHydrated(),
+  };
+}

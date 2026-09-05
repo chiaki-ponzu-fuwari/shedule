@@ -1,22 +1,36 @@
 {
   "expo": {
-    "name": "スケジュール",
-    "slug": "schedule-share-app",
+    "name": "レコト",
+    "slug": "recoto",
     "version": "1.0.0",
+    "icon": "./assets/images/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "scheme": "scheduleshare",
+    "scheme": "recoto",
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F4F7FC"
+    },
     "platforms": [
       "ios",
       "android",
       "web"
     ],
+    "locales": {
+      "ja": "./locales/ja.json",
+      "en": "./locales/en.json"
+    },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.scheduleshare.app"
+      "bundleIdentifier": "com.herac.recoto",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true
+      }
     },
     "android": {
-      "package": "com.scheduleshare.app",
+      "package": "com.herac.recoto",
       "adaptiveIcon": {
         "backgroundColor": "#FFF0F5"
       }
@@ -25,7 +39,24 @@
       "expo-router",
       "expo-asset",
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#2878F0"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "予定・日記・グループ・画像スタンプに、あなたが選んだ写真を表示するために使用します。",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      "expo-secure-store",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true

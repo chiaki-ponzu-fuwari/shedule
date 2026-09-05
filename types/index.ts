@@ -18,20 +18,40 @@ export interface MiniStamps {
   right?: string;  // stamp ID
 }
 
+export interface NoteItem {
+  id: string;
+  text: string;
+  time?: string;               // "HH:MM" 開始時間
+  endTime?: string;            // "HH:MM" 終了時間
+  notificationEnabled?: boolean;
+  notificationId?: string;
+  fromTimeSlotId?: string;     // タイムスロットから反映された場合のID
+  color?: string;              // タイムスケジュール表示色
+  url?: string;                // ZOOMリンク・GoogleMAPなど外部URL
+  fromGoogleId?: string;       // GoogleカレンダーイベントID（Googleから同期した場合）
+  /** 最後にGoogleへ送った内容の指紋（無駄な update API を省略） */
+  googlePushFingerprint?: string;
+  syncToGoogle?: boolean;      // このアイテムをGoogleに同期するか
+  googleSyncDirection?: 'none' | 'toGoogle' | 'fromGoogle' | 'both'; // 同期方向
+}
+
 export interface DayEntry {
   date: string;          // YYYY-MM-DD
   mainStampId?: string;
   miniStamps: MiniStamps;
   notes?: string;
-  noteItems?: string[];          // 複数メモ・予定リスト
+  noteItems?: NoteItem[];        // 複数メモ・予定リスト
   privacyLevel: PrivacyLevel;
   startTime?: string;            // "HH:MM"
   endTime?: string;              // "HH:MM"
   notificationEnabled?: boolean;
+  notificationId?: string;       // スケジュール済み通知ID
   imageUri?: string;             // photo URI for image stamp
   timeSlots?: TimeSlot[];        // timeline events
   diary?: string;                // 日記テキスト
-  diaryPhotos?: string[];        // 写真URI（枚数制限なし）
+  diaryPhotos?: string[];        // 写真URI（最大2枚）
+  diaryConfirmed?: boolean;      // 日記確定フラグ
+  dailyGoal?: string;            // 本日の目標
 }
 
 export interface TimeSlot {
@@ -40,6 +60,10 @@ export interface TimeSlot {
   endTime: string;   // "HH:MM"
   title: string;
   color: string;
+  url?: string; // 外部URL（任意）
+  notificationEnabled?: boolean;
+  notificationId?: string;
+  reflectToMonthly?: boolean;  // マンスリーカレンダーに反映するか
 }
 
 export interface RecurringSchedule {
@@ -48,6 +72,7 @@ export interface RecurringSchedule {
   stampId: string;
   stampPosition: 'main' | 'mini-left' | 'mini-right';
   daysOfWeek: number[];  // 0=Sun, 1=Mon, ..., 6=Sat
+  appliedMonths?: string[]; // 適用済み月 "YYYY-MM" 形式
 }
 
 export interface SpecialDate {
@@ -72,6 +97,7 @@ export interface Group {
   name: string;
   color: string;
   emoji: string;
+  iconUri?: string; // 画像アイコン（端末ローカルURI）
   inviteCode: string;
   members: GroupMember[];
   sharedMemo?: string;
@@ -82,9 +108,12 @@ export interface GroupSharingSettings {
   shareMain: boolean;
   shareMini: boolean;
   shareNotes: boolean;
+  shareTimeSchedule: boolean;
 }
 
 export interface SharedEntry {
+  id: string;
+  groupId: string;
   userId: string;
   userName: string;
   userColor: string;
@@ -97,6 +126,7 @@ export interface SharedEntry {
   miniRightText?: string;
   miniRightBg?: string;
   notes?: string;
+  timeSlots?: TimeSlot[];
 }
 
 export interface SyncEntryData {
@@ -109,6 +139,7 @@ export interface SyncEntryData {
   miniRightText?: string;
   miniRightBg?: string;
   notes?: string;
+  timeSlots?: TimeSlot[];
 }
 
 export type CalendarView = 'monthly' | 'weekly' | 'daily';
@@ -122,3 +153,14 @@ export interface DayInfo {
   isSaturday: boolean;
   specialDate?: SpecialDate;
 }
+
+export type {
+  Trip,
+  TripDraft,
+  TripDraftError,
+  TripItem,
+  TripItemDraft,
+  TripItemType,
+  TripTransportIcon,
+  TripWeekSegment,
+} from './travel';

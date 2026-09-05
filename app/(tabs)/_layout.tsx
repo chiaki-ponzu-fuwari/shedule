@@ -2,6 +2,8 @@ import { Tabs } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
+import { useLocaleStore } from '../../store/localeStore';
+import { tx } from '../../constants/i18n';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -14,6 +16,7 @@ function TabIcon({ name, color, focused }: { name: IconName; color: string; focu
 }
 
 export default function TabLayout() {
+  const locale = useLocaleStore((s) => s.locale);
   return (
     <Tabs
       screenOptions={{
@@ -28,16 +31,25 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'カレンダー',
+          title: tx(locale, 'tab.calendar'),
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name={focused ? 'calendar' : 'calendar-outline'} color={color} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
+        name="travel"
+        options={{
+          title: tx(locale, 'tab.travel'),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? 'airplane' : 'airplane-outline'} color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="groups"
         options={{
-          title: 'グループ',
+          title: tx(locale, 'tab.groups'),
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name={focused ? 'people' : 'people-outline'} color={color} focused={focused} />
           ),
@@ -46,7 +58,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: '設定',
+          title: tx(locale, 'tab.settings'),
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name={focused ? 'settings' : 'settings-outline'} color={color} focused={focused} />
           ),
@@ -65,7 +77,7 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingTop: 6,
     elevation: 12,
-    shadowColor: '#A78BFA',
+    shadowColor: '#3B82F6',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.08,
     shadowRadius: 12,
@@ -83,6 +95,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   iconWrapActive: {
-    backgroundColor: '#FFE4F0',
+    backgroundColor: '#DBEAFE',
   },
 });

@@ -4,11 +4,12 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import { useCalendarStore } from '../../store/calendarStore';
 import { colors } from '../../constants/colors';
 import { SpecialDate } from '../../types';
 import { WheelPicker } from '../ui/WheelPicker';
+import { useTranslation } from '../../constants/i18n';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -18,10 +19,10 @@ const ICON_OPTIONS: IoniconName[] = [
   'balloon-outline', 'rose-outline',
 ];
 
-const TYPE_OPTIONS: { key: SpecialDate['type']; label: string; icon: IoniconName }[] = [
-  { key: 'birthday', label: '誕生日', icon: 'gift-outline' },
-  { key: 'anniversary', label: '記念日', icon: 'heart-outline' },
-  { key: 'other', label: 'その他', icon: 'star-outline' },
+const TYPE_OPTIONS: { key: SpecialDate['type']; labelKey: string; icon: IoniconName }[] = [
+  { key: 'birthday', labelKey: 'special.tab.birthday', icon: 'gift-outline' },
+  { key: 'anniversary', labelKey: 'special.tab.anniversary', icon: 'heart-outline' },
+  { key: 'other', labelKey: 'special.tab.other', icon: 'star-outline' },
 ];
 const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -32,6 +33,7 @@ interface Props {
 }
 
 export function BirthdayModal({ visible, onClose }: Props) {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [month, setMonth] = useState(1);
   const [day, setDay] = useState(1);
@@ -61,7 +63,7 @@ export function BirthdayModal({ visible, onClose }: Props) {
     onClose();
   };
 
-  const COLOR_OPTIONS = ['#FF6B9D', '#A78BFA', '#34D399', '#60A5FA', '#FBBF24', '#FB923C'];
+  const COLOR_OPTIONS = ['#FF6B9D', '#3B82F6', '#34D399', '#60A5FA', '#FBBF24', '#FB923C'];
 
   return (
     <Modal
@@ -75,14 +77,14 @@ export function BirthdayModal({ visible, onClose }: Props) {
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.header}>
-            <Text style={styles.title}>誕生日・記念日</Text>
+            <Text style={styles.title}>{t('birthdayModal.title')}</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <Text style={styles.closeBtnText}>✕</Text>
             </TouchableOpacity>
           </View>
 
           {/* Type */}
-          <Text style={styles.fieldLabel}>種類</Text>
+          <Text style={styles.fieldLabel}>{t('birthdayModal.type')}</Text>
           <View style={styles.typeRow}>
             {TYPE_OPTIONS.map((opt) => (
               <TouchableOpacity
@@ -92,24 +94,24 @@ export function BirthdayModal({ visible, onClose }: Props) {
               >
                 <Ionicons name={opt.icon} size={14} color={type === opt.key ? colors.primary : colors.textSecondary} />
                 <Text style={[styles.typeBtnText, type === opt.key && styles.typeBtnTextActive]}>
-                  {opt.label}
+                  {t(opt.labelKey)}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
           {/* Name */}
-          <Text style={styles.fieldLabel}>名前・タイトル</Text>
+          <Text style={styles.fieldLabel}>{t('birthdayModal.name')}</Text>
           <TextInput
             style={styles.nameInput}
             value={name}
             onChangeText={setName}
-            placeholder="例: たろうの誕生日、結婚記念日"
+            placeholder={t('birthdayModal.namePh')}
             placeholderTextColor={colors.textLight}
           />
 
           {/* Icon */}
-          <Text style={styles.fieldLabel}>アイコン</Text>
+          <Text style={styles.fieldLabel}>{t('birthdayModal.icon')}</Text>
           <View style={styles.emojiRow}>
             {ICON_OPTIONS.map((iconName) => (
               <TouchableOpacity
@@ -127,7 +129,7 @@ export function BirthdayModal({ visible, onClose }: Props) {
           </View>
 
           {/* Date — WheelPickerはScrollView外に配置（ジェスチャー競合回避） */}
-          <Text style={styles.fieldLabel}>日付（毎年繰り返し）</Text>
+          <Text style={styles.fieldLabel}>{t('birthdayModal.date')}</Text>
           <View style={styles.datePickerRow}>
             <WheelPicker
               items={MONTHS}
@@ -137,7 +139,7 @@ export function BirthdayModal({ visible, onClose }: Props) {
                 setMonth(newMonth);
                 setDay(Math.min(day, MONTH_DAYS[i]));
               }}
-              formatItem={(v) => `${v}月`}
+              formatItem={(v) => t('birthdayModal.monthFmt', { v })}
               width={110}
             />
             <Text style={styles.dateSep}>—</Text>
@@ -145,13 +147,13 @@ export function BirthdayModal({ visible, onClose }: Props) {
               items={Array.from({ length: maxDays }, (_, i) => i + 1)}
               selectedIndex={Math.min(day, maxDays) - 1}
               onChange={(i) => setDay(i + 1)}
-              formatItem={(v) => `${v}日`}
+              formatItem={(v) => t('birthdayModal.dayFmt', { v })}
               width={110}
             />
           </View>
 
           {/* Color */}
-          <Text style={styles.fieldLabel}>カラー</Text>
+          <Text style={styles.fieldLabel}>{t('birthdayModal.color')}</Text>
           <View style={styles.colorRow}>
             {COLOR_OPTIONS.map((c) => (
               <TouchableOpacity
@@ -168,7 +170,7 @@ export function BirthdayModal({ visible, onClose }: Props) {
             onPress={handleSave}
             disabled={!name.trim()}
           >
-            <Text style={styles.saveBtnText}>登録する</Text>
+            <Text style={styles.saveBtnText}>{t('birthdayModal.save')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -177,9 +179,9 @@ export function BirthdayModal({ visible, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(45,27,105,0.45)', justifyContent: 'flex-end' },
+  overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingBottom: 40, maxHeight: '92%' },
-  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0D0F0', alignSelf: 'center', marginTop: 10, marginBottom: 8 },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#BFDBFE', alignSelf: 'center', marginTop: 10, marginBottom: 8 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
   title: { fontSize: 18, fontWeight: '800', color: colors.text },
   closeBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F0E6F0', alignItems: 'center', justifyContent: 'center' },
@@ -187,13 +189,13 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: 16, marginBottom: 8 },
   typeRow: { flexDirection: 'row', gap: 8 },
   typeBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 4 },
-  typeBtnActive: { borderColor: colors.primary, backgroundColor: '#FFE4F0' },
+  typeBtnActive: { borderColor: colors.primary, backgroundColor: '#DBEAFE' },
   typeBtnText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
   typeBtnTextActive: { color: colors.primary },
   nameInput: { borderWidth: 2, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: colors.text },
   emojiRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   emojiBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  emojiBtnActive: { borderColor: colors.primary, backgroundColor: '#FFE4F0' },
+  emojiBtnActive: { borderColor: colors.primary, backgroundColor: '#DBEAFE' },
   emoji: { fontSize: 22 },
   datePickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   dateSep: { fontSize: 22, color: colors.textLight, fontWeight: '700' },

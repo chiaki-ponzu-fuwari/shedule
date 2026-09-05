@@ -1,0 +1,203 @@
+:root {
+  color-scheme: light;
+  --ink: #17324d;
+  --muted: #597087;
+  --line: #dbe6f1;
+  --paper: #ffffff;
+  --wash: #f4f8fc;
+  --brand: #2878f0;
+  --brand-dark: #1559ba;
+  --focus: #1559ba;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--wash); }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top right, rgba(40, 120, 240, 0.1), transparent 32rem),
+    var(--wash);
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+a { color: var(--brand-dark); text-underline-offset: 0.18em; }
+a:hover { text-decoration-thickness: 2px; }
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 10;
+  left: 1rem;
+  top: 1rem;
+  padding: 0.6rem 0.9rem;
+  color: #fff;
+  background: var(--ink);
+  transform: translateY(-180%);
+}
+
+.skip-link:focus { transform: translateY(0); }
+
+.site-header {
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.header-inner,
+.page,
+.site-footer {
+  width: min(calc(100% - 2rem), 72rem);
+  margin-inline: auto;
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4.5rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--ink);
+  font-size: 1.1rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.65rem;
+  color: #fff;
+  background: var(--brand);
+}
+
+.language-switch { display: flex; gap: 0.35rem; }
+
+.language-switch button {
+  min-width: 3rem;
+  min-height: 2.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #fff;
+  cursor: pointer;
+}
+
+.language-switch button[aria-pressed="true"] {
+  border-color: var(--brand-dark);
+  color: #fff;
+  background: var(--brand-dark);
+}
+
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15rem;
+  gap: clamp(2rem, 6vw, 5rem);
+  align-items: start;
+  padding-block: clamp(2.5rem, 7vw, 5rem);
+}
+
+.document {
+  max-width: 72ch;
+  padding: clamp(1.25rem, 4vw, 3rem);
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: var(--paper);
+  box-shadow: 0 1.2rem 3rem rgba(31, 67, 103, 0.07);
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--brand-dark);
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1, h2, h3 { line-height: 1.3; letter-spacing: -0.025em; }
+h1 { margin: 0; font-size: clamp(2rem, 6vw, 3.35rem); }
+h2 { margin-top: 2.6rem; padding-top: 0.4rem; font-size: 1.35rem; }
+h3 { margin-top: 1.6rem; font-size: 1.05rem; }
+
+.updated,
+.note { color: var(--muted); }
+
+.summary {
+  margin-block: 2rem;
+  padding: 1rem 1.15rem;
+  border-left: 4px solid var(--brand);
+  border-radius: 0 0.7rem 0.7rem 0;
+  background: #edf5ff;
+}
+
+.callout {
+  margin-block: 1.5rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid #bcd5f5;
+  border-radius: 0.8rem;
+  background: #f7fbff;
+}
+
+.action {
+  display: inline-flex;
+  justify-content: center;
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  color: #fff;
+  background: var(--brand-dark);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.side-nav {
+  position: sticky;
+  top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.side-nav strong { display: block; margin-bottom: 0.5rem; }
+.side-nav a { display: block; padding: 0.35rem 0; }
+.side-nav a[aria-current="page"] { color: var(--ink); font-weight: 750; text-decoration: none; }
+
+.site-footer {
+  padding-block: 2rem 3rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+[hidden] { display: none !important; }
+
+@media (max-width: 760px) {
+  .page { grid-template-columns: 1fr; }
+  .side-nav { position: static; }
+  .header-inner { align-items: flex-start; padding-block: 0.8rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

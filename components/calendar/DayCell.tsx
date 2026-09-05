@@ -1,12 +1,15 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { DayInfo, DayEntry, Stamp } from '../../types';
 import { colors } from '../../constants/colors';
+import { PersonalMediaImage } from '../common/PersonalMediaImage';
 
-const CELL_MARGIN = 2;  // 左右それぞれのマージン
-const CELL_W = Math.floor((Dimensions.get('window').width - CELL_MARGIN * 2 * 7) / 7);
-const CELL_H = 74;
+/** 左右それぞれのマージン（MonthlyView の列幅計算と揃える） */
+export const DAY_CELL_MARGIN_H = 2;
+// The 7px travel lane sits above the date without stealing space from dense bands.
+const CELL_H_SHRINK = 5;
+const CELL_H = 74 - CELL_H_SHRINK;
 
 interface Props {
   day: DayInfo;
@@ -18,6 +21,8 @@ interface Props {
   isSelected: boolean;
   imageUri?: string;
   hasNotes?: boolean;
+  /** 親グリッドの実幅に基づくセル幅（Web 等で window 幅とコンテナ幅がずれる場合に必須） */
+  cellWidth?: number;
 }
 
 export function DayCell({
@@ -30,6 +35,7 @@ export function DayCell({
   isSelected,
   imageUri,
   hasNotes,
+  cellWidth,
 }: Props) {
   const isOtherMonth = !day.isCurrentMonth;
 
@@ -38,53 +44,54 @@ export function DayCell({
       onPress={onPress}
       style={[
         styles.cell,
+        cellWidth != null
+          ? { width: cellWidth }
+          : { flexGrow: 0, flexShrink: 0, flexBasis: '14.285714%', maxWidth: '14.285714%' },
         isSelected && styles.cellSelected,
         isOtherMonth && styles.cellFaded,
       ]}
       activeOpacity={0.65}
     >
-      {/* ── 日付（最上段）── */}
-      <View style={styles.dateRow}>
-        <View>
-        <View style={[styles.dateCircle, day.isToday && styles.todayCircle]}>
-          <Text
-            style={[
-              styles.dateNum,
-              day.isToday && styles.todayNum,
-              !day.isToday && day.isSunday && styles.sundayNum,
-              !day.isToday && day.isSaturday && styles.saturdayNum,
-              isOtherMonth && styles.otherNum,
-            ]}
-          >
-            {day.date.getDate()}
-          </Text>
-          {day.specialDate && !day.isToday && (
-            <View style={[styles.specialDot, { backgroundColor: '#60A5FA' }]} />
-          )}
+      {/* ── 日付（左上固定）── */}
+      <View style={styles.dateAnchor}>
+        <Text
+          style={[
+            styles.dateNum,
+            day.isToday && styles.todayNum,
+            !day.isToday && day.isSunday && styles.sundayNum,
+            !day.isToday && day.isSaturday && styles.saturdayNum,
+            isOtherMonth && styles.otherNum,
+          ]}
+        >
+          {day.date.getDate()}
+        </Text>
+        <View style={styles.dotsRow}>
+          {day.specialDate && <View testID="special-date-dot" style={[styles.dot, { backgroundColor: '#60A5FA' }]} />}
+          {hasNotes && <View testID="notes-dot" style={[styles.dot, { backgroundColor: '#FFB3CC' }]} />}
         </View>
-        {hasNotes && <View style={styles.notesDot} />}
-        </View>
-        {imageUri ? (
-          imageUri.startsWith('icon://') ? (
-            <View style={styles.imageStamp}>
-              <Ionicons
-                name={imageUri.replace('icon://', '') as any}
-                size={14}
-                color={colors.primary}
-              />
-            </View>
-          ) : (
-            <Image source={{ uri: imageUri }} style={styles.imageStamp} />
-          )
-        ) : null}
       </View>
+
+      {/* ── 画像スタンプ（右上固定）── */}
+      {imageUri ? (
+        imageUri.startsWith('icon://') ? (
+          <View style={styles.imageStamp}>
+            <Ionicons
+              name={imageUri.replace('icon://', '') as any}
+              size={14}
+              color={colors.primary}
+            />
+          </View>
+        ) : (
+          <PersonalMediaImage domain={['calendar', 'stamp']} uri={imageUri} style={styles.imageStamp} />
+        )
+      ) : null}
 
       {/* ── ミニ＋メイン帯（隙間なし・下端ぴったり）── */}
       <View style={styles.bottomBlock}>
         {/* ミニスタンプ行 */}
         <View style={styles.miniRow}>
           {leftMiniStamp ? (
-            <View style={[styles.miniBar, { backgroundColor: leftMiniStamp.bgColor }]}>
+            <View testID="mini-stamp-band-left" style={[styles.miniBar, { backgroundColor: leftMiniStamp.bgColor }]}>
               <Text style={[styles.miniText, { color: leftMiniStamp.textColor }]} numberOfLines={1}>
                 {leftMiniStamp.text}
               </Text>
@@ -93,7 +100,7 @@ export function DayCell({
             <View style={styles.miniBarEmpty} />
           )}
           {rightMiniStamp ? (
-            <View style={[styles.miniBar, { backgroundColor: rightMiniStamp.bgColor }]}>
+            <View testID="mini-stamp-band-right" style={[styles.miniBar, { backgroundColor: rightMiniStamp.bgColor }]}>
               <Text style={[styles.miniText, { color: rightMiniStamp.textColor }]} numberOfLines={1}>
                 {rightMiniStamp.text}
               </Text>
@@ -105,7 +112,7 @@ export function DayCell({
 
         {/* メインスタンプ帯（下枠まで塗り潰し）*/}
         {mainStamp ? (
-          <View style={[styles.mainBand, { backgroundColor: mainStamp.bgColor }]}>
+          <View testID="main-stamp-band" style={[styles.mainBand, { backgroundColor: mainStamp.bgColor }]}>
             <Text style={[styles.mainBandText, { color: mainStamp.textColor }]} numberOfLines={1}>
               {mainStamp.text}
             </Text>
@@ -120,13 +127,12 @@ export function DayCell({
 
 const styles = StyleSheet.create({
   cell: {
-    width: CELL_W,
     height: CELL_H,
-    marginHorizontal: CELL_MARGIN,
+    marginHorizontal: DAY_CELL_MARGIN_H,
     marginVertical: 1,
     alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingTop: 4,
+    justifyContent: 'flex-end',
+    paddingTop: 0,
     paddingBottom: 0,
     borderRadius: 6,
     backgroundColor: '#FFFFFF',
@@ -139,61 +145,39 @@ const styles = StyleSheet.create({
     opacity: 0.28,
   },
 
-  notesDot: {
+  dotsRow: { flexDirection: 'row', gap: 2, marginTop: 1 },
+  dot: {
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: '#FFB3CC',
-    alignSelf: 'flex-start',
-    marginLeft: 3,
-    marginTop: -2,
   },
 
-  // 日付行（画像スタンプと並べる）
-  dateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    paddingRight: 3,
+  // 左上：日付固定（角に寄せて“中身領域”を広く見せる）
+  dateAnchor: {
+    position: 'absolute',
+    top: 9,
+    left: 2,
+    alignItems: 'flex-start',
   },
   imageStamp: {
+    position: 'absolute',
+    top: 9,
+    right: 2,
     width: 20,
     height: 20,
     borderRadius: 10,
   },
 
-  // 日付
-  dateCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 3,
-  },
-  todayCircle: {
-    backgroundColor: '#D9D9D9',
-    borderRadius: 12,
-  },
   dateNum: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.text,
     lineHeight: 14,
   },
-  todayNum: { color: colors.text, fontWeight: '800' },
+  todayNum: { color: colors.text, fontWeight: '900' },
   sundayNum: { color: colors.sunday },
   saturdayNum: { color: colors.saturday },
   otherNum: { color: '#C9B8D8' },
-  specialDot: {
-    position: 'absolute',
-    bottom: 1,
-    right: 1,
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-  },
 
   // ミニ＋メイン帯をまとめたブロック（隙間なし）
   bottomBlock: {
@@ -215,6 +199,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    opacity: 0.55,
   },
   miniBarEmpty: {
     flex: 1,
@@ -231,14 +216,14 @@ const styles = StyleSheet.create({
   mainBand: {
     width: '100%',
     height: 22,
-    borderRadius: 0,           // 角丸なし→下枠にぴったり
+    borderRadius: 0,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   mainBandText: {
-    fontSize: 10,
-    fontWeight: '900',
+    fontSize: 12,
+    fontWeight: '600',
     letterSpacing: 0.5,
   },
   mainBandEmpty: {

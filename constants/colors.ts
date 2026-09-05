@@ -1,12 +1,12 @@
 export const colors = {
-  // Primary palette – soft pink/lavender
-  primary: '#FF6B9D',
-  primaryLight: '#FFB3CC',
-  primaryDark: '#E91E8C',
-  primaryBg: '#FFF0F5',
+  // Primary palette – focus blue
+  primary: '#2563EB',
+  primaryLight: '#BFDBFE',
+  primaryDark: '#1D4ED8',
+  primaryBg: '#EFF6FF',
 
-  secondary: '#A78BFA',
-  secondaryLight: '#EDE9FE',
+  secondary: '#0EA5E9',
+  secondaryLight: '#E0F2FE',
 
   accent: '#34D399',
   accentBlue: '#60A5FA',
@@ -15,44 +15,81 @@ export const colors = {
   yellow: '#FBBF24',
 
   // Backgrounds
-  background: '#FFF5F8',
+  background: '#F8FAFF',
   card: '#FFFFFF',
-  surface: '#FFF0F5',
+  surface: '#EFF6FF',
   surfaceGray: '#F8F9FA',
 
   // Text
-  text: '#2D1B69',
-  textSecondary: '#7C6B8A',
-  textLight: '#B8A9C4',
+  text: '#0F172A',
+  textSecondary: '#475569',
+  textLight: '#94A3B8',
   textInverse: '#FFFFFF',
 
   // Borders
-  border: '#EDE0EF',
-  divider: '#F5EFF5',
+  border: '#DBEAFE',
+  divider: '#EFF6FF',
 
   // Status
-  today: '#FF6B9D',
-  sunday: '#FF4B4B',
-  saturday: '#4B9EFF',
+  today: '#2563EB',
+  sunday: '#EF4444',
+  saturday: '#0EA5E9',
 
-  // Stamp palette（パステル・淡い色味）
-  stampColors: [
+  // メイン帯用カラー（中程度の明るさ・しっかりした色）
+  stampMainColors: [
+    '#F06292', // ピンク
+    '#D4699A', // ローズ
+    '#E57373', // レッド
+    '#E8855A', // サーモンオレンジ
+    '#FFA040', // オレンジ
+    '#FFD54F', // イエロー
+    '#D4E157', // ライムイエロー
+    '#66BB6A', // グリーン
+    '#26C6A0', // ミント
+    '#4DB6AC', // ティール
+    '#4FC3F7', // スカイブルー
+    '#4A8FB5', // スチールブルー
+    '#5C9FD6', // ブルー
+    '#7986CB', // インディゴ
+    '#A78BFA', // ラベンダー
+    '#BA68C8', // パープル
+    '#CE93D8', // ライトパープル
+    '#F48FB1', // ライトピンク
+    '#90A4AE', // ブルーグレー
+    '#B0BEC5', // シルバーグレー
+  ],
+
+  // ミニ帯用カラー（パステル・淡め）
+  stampMiniColors: [
     '#FCA5A5', // 淡いレッド
     '#F9A8D4', // 淡いピンク
+    '#FBCFE8', // 淡いローズ
     '#FDA4AF', // 淡いコーラル
-    '#FBD0A0', // 淡いオレンジ
+    '#FED7AA', // 淡いオレンジ
     '#FDE68A', // 淡いイエロー
-    '#BEF264', // 淡いライム
+    '#FEF08A', // 淡いレモン
+    '#D9F99D', // 淡いライム
     '#86EFAC', // 淡いグリーン
     '#6EE7B7', // 淡いミント
-    '#5EEAD4', // 淡いティール
+    '#99F6E4', // 淡いアクア
+    '#BAE6FD', // 淡いスカイ
     '#93C5FD', // 淡いブルー
+    '#BFDBFE', // 淡いペリウィンクル
     '#A5B4FC', // 淡いインディゴ
-    '#C4B5FD', // 淡いパープル
+    '#C4B5FD', // 淡いラベンダー
+    '#DDD6FE', // 淡いバイオレット
     '#F0ABFC', // 淡いフューシャ
+    '#FBCFE8', // 淡いマゼンタ
+    '#E2E8F0', // 淡いスレート
     '#D1D5DB', // 淡いグレー
-    '#6B7280', // ミディアムグレー
     '#FFFFFF', // ホワイト
+  ],
+
+  // 後方互換（旧参照用）
+  stampColors: [
+    '#FCA5A5', '#F9A8D4', '#FDA4AF', '#FBD0A0', '#FDE68A',
+    '#BEF264', '#86EFAC', '#6EE7B7', '#5EEAD4', '#93C5FD',
+    '#A5B4FC', '#C4B5FD', '#F0ABFC', '#D1D5DB', '#6B7280', '#FFFFFF',
   ],
 
   // Text colors for stamps

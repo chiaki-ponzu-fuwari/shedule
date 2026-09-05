@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, Modal, TouchableOpacity, TextInput, StyleSheet,
-  ScrollView,
+  ScrollView, Alert,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import { useStampStore } from '../../store/stampStore';
 import { colors } from '../../constants/colors';
 import { Stamp } from '../../types';
+import { useTranslation } from '../../constants/i18n';
 
 interface Props {
   visible: boolean;
@@ -19,6 +20,7 @@ function limitToChars(input: string, max: number) {
 }
 
 export function AddStampModal({ visible, onClose, editStamp }: Props) {
+  const { t } = useTranslation();
   const isEditMode = !!editStamp;
 
   const [text, setText] = useState('');
@@ -28,6 +30,7 @@ export function AddStampModal({ visible, onClose, editStamp }: Props) {
 
   const addStamp = useStampStore((s) => s.addStamp);
   const updateStamp = useStampStore((s) => s.updateStamp);
+  const removeStamp = useStampStore((s) => s.removeStamp);
 
   // 編集モード時に既存値を流し込む
   useEffect(() => {
@@ -82,7 +85,7 @@ export function AddStampModal({ visible, onClose, editStamp }: Props) {
           <View style={styles.handle} />
 
           <View style={styles.header}>
-            <Text style={styles.title}>{isEditMode ? 'スタンプを編集' : 'スタンプを作る'}</Text>
+            <Text style={styles.title}>{isEditMode ? t('addStamp.edit') : t('addStamp.create')}</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <Text style={styles.closeBtnText}>✕</Text>
             </TouchableOpacity>
@@ -100,14 +103,14 @@ export function AddStampModal({ visible, onClose, editStamp }: Props) {
 
             {/* テキスト */}
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>テキスト（最大2文字）</Text>
+              <Text style={styles.fieldLabel}>{t('addStamp.textLabel')}</Text>
               <TextInput
                 style={styles.textInput}
                 value={text}
                 onChangeText={setText}
                 onEndEditing={() => setText((p) => limitToChars(p.trim(), 2))}
                 onSubmitEditing={() => setText((p) => limitToChars(p.trim(), 2))}
-                placeholder="例: 日勤、休"
+                placeholder={t('addStamp.textPh')}
                 placeholderTextColor={colors.textLight}
                 returnKeyType="done"
                 autoFocus
@@ -118,30 +121,30 @@ export function AddStampModal({ visible, onClose, editStamp }: Props) {
             {/* 種類 */}
             <View style={styles.toggleRow}>
               <View>
-                <Text style={styles.fieldLabel}>種類</Text>
-                <Text style={styles.fieldSub}>{isMain ? 'メイン帯に使用' : 'ミニスタンプ専用'}</Text>
+                <Text style={styles.fieldLabel}>{t('addStamp.kindLabel')}</Text>
+                <Text style={styles.fieldSub}>{isMain ? t('addStamp.kindMainHint') : t('addStamp.kindMiniHint')}</Text>
               </View>
               <View style={styles.toggleGroup}>
                 <TouchableOpacity
                   style={[styles.typeBtn, isMain && styles.typeBtnActive]}
                   onPress={() => { Haptics.selectionAsync(); setIsMain(true); }}
                 >
-                  <Text style={[styles.typeBtnText, isMain && styles.typeBtnTextActive]}>メイン</Text>
+                  <Text style={[styles.typeBtnText, isMain && styles.typeBtnTextActive]}>{t('addStamp.main')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.typeBtn, !isMain && styles.typeBtnActiveSecondary]}
                   onPress={() => { Haptics.selectionAsync(); setIsMain(false); }}
                 >
-                  <Text style={[styles.typeBtnText, !isMain && styles.typeBtnTextActiveSecondary]}>ミニ専用</Text>
+                  <Text style={[styles.typeBtnText, !isMain && styles.typeBtnTextActiveSecondary]}>{t('addStamp.miniOnly')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
             {/* 背景色 */}
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>背景色</Text>
+              <Text style={styles.fieldLabel}>{t('addStamp.bg')}</Text>
               <View style={styles.colorGrid}>
-                {colors.stampColors.map((c) => (
+                {(isMain ? colors.stampMainColors : colors.stampMiniColors).map((c) => (
                   <TouchableOpacity
                     key={c}
                     style={[
@@ -158,7 +161,7 @@ export function AddStampModal({ visible, onClose, editStamp }: Props) {
 
             {/* 文字色 */}
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>文字色</Text>
+              <Text style={styles.fieldLabel}>{t('addStamp.fg')}</Text>
               <View style={styles.textColorRow}>
                 {colors.stampTextColors.map((c) => (
                   <TouchableOpacity
@@ -177,13 +180,34 @@ export function AddStampModal({ visible, onClose, editStamp }: Props) {
               </View>
             </View>
 
+            {/* 削除ボタン（編集モード時） */}
+            {isEditMode && editStamp && (
+              <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={() => {
+                  Alert.alert(t('addStamp.deleteTitle'), t('addStamp.deleteMsg', { name: editStamp.text }), [
+                    { text: t('common.cancel'), style: 'cancel' },
+                    {
+                      text: t('common.delete'), style: 'destructive', onPress: () => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        removeStamp(editStamp.id);
+                        onClose();
+                      },
+                    },
+                  ]);
+                }}
+              >
+                <Text style={styles.deleteBtnText}>{t('addStamp.removeThis')}</Text>
+              </TouchableOpacity>
+            )}
+
             {/* 保存ボタン */}
             <TouchableOpacity
               style={[styles.saveBtn, !text.trim() && styles.saveBtnDisabled]}
               onPress={handleSave}
               disabled={!text.trim()}
             >
-              <Text style={styles.saveBtnText}>{isEditMode ? '変更を保存 ✓' : '保存する ✓'}</Text>
+              <Text style={styles.saveBtnText}>{isEditMode ? t('addStamp.saveChanges') : t('addStamp.saveNew')}</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -193,9 +217,9 @@ export function AddStampModal({ visible, onClose, editStamp }: Props) {
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(45,27,105,0.45)', justifyContent: 'flex-end' },
+  overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingBottom: 40, maxHeight: '90%' },
-  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0D0F0', alignSelf: 'center', marginTop: 10, marginBottom: 8 },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#BFDBFE', alignSelf: 'center', marginTop: 10, marginBottom: 8 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
   title: { fontSize: 18, fontWeight: '800', color: colors.text },
   closeBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F0E6F0', alignItems: 'center', justifyContent: 'center' },
@@ -211,8 +235,8 @@ const styles = StyleSheet.create({
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   toggleGroup: { flexDirection: 'row', gap: 8 },
   typeBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5, borderColor: colors.border, backgroundColor: '#FAFAFA' },
-  typeBtnActive: { borderColor: colors.primary, backgroundColor: '#FFE4F0' },
-  typeBtnActiveSecondary: { borderColor: colors.secondary, backgroundColor: '#EDE9FE' },
+  typeBtnActive: { borderColor: colors.primary, backgroundColor: '#DBEAFE' },
+  typeBtnActiveSecondary: { borderColor: colors.secondary, backgroundColor: '#EFF6FF' },
   typeBtnText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
   typeBtnTextActive: { color: colors.primary },
   typeBtnTextActiveSecondary: { color: colors.secondary },
@@ -222,6 +246,8 @@ const styles = StyleSheet.create({
   colorDotWhite: { borderWidth: 1, borderColor: colors.border },
   textColorRow: { flexDirection: 'row', gap: 10 },
   textColorDot: { width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  deleteBtn: { backgroundColor: '#FFF0F0', borderRadius: 16, paddingVertical: 14, alignItems: 'center', marginTop: 8, marginBottom: 4, borderWidth: 1.5, borderColor: '#FCA5A5' },
+  deleteBtnText: { fontSize: 15, fontWeight: '700', color: '#EF4444' },
   saveBtn: { backgroundColor: colors.primary, borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginTop: 8, marginBottom: 8, shadowColor: colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   saveBtnDisabled: { backgroundColor: colors.textLight, shadowOpacity: 0 },
   saveBtnText: { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
