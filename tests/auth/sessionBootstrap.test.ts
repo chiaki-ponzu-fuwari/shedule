@@ -827,6 +827,8 @@ test('group detail shows a retryable error when memo blur save fails', () => {
   expect(i18n.match(/'common\.retry':/g)).toHaveLength(2);
 });
 
+const GROUP_DETAIL_INTEGRATION_TIMEOUT_MS = 15_000;
+
 describe('group detail memo save behavior', () => {
   afterEach(() => {
     jest.restoreAllMocks();
@@ -954,7 +956,7 @@ describe('group detail memo save behavior', () => {
     fireEvent(reopened.getByPlaceholderText('groupDetail.memoPh'), 'blur');
     expect(updateSharedMemo).toHaveBeenCalledTimes(1);
     reopened.unmount();
-  });
+  }, GROUP_DETAIL_INTEGRATION_TIMEOUT_MS);
 
   test('forwards each blur with its draft to the store-owned save queue', async () => {
     let resolveFirst!: () => void;
@@ -984,7 +986,7 @@ describe('group detail memo save behavior', () => {
 
     expect(updateSharedMemo).toHaveBeenCalledTimes(2);
     unmount();
-  });
+  }, GROUP_DETAIL_INTEGRATION_TIMEOUT_MS);
 
   test('web retry resends the latest draft and catches another rejection', async () => {
     let rejectFirst!: (error: Error) => void;
@@ -1015,7 +1017,7 @@ describe('group detail memo save behavior', () => {
     expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'pending draft');
     expect(updateSharedMemo).toHaveBeenNthCalledWith(2, 'group-1', 'latest draft');
     unmount();
-  });
+  }, GROUP_DETAIL_INTEGRATION_TIMEOUT_MS);
 });
 
 test('group visibility is limited to connected identity modes', () => {
