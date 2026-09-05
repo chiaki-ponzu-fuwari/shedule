@@ -20,7 +20,7 @@ export function useGoogleAuth() {
   const isSignedIn = useGoogleAuthStore((s) => s.isSignedIn);
 
   // Webは implicit flow を使うため PKCE を無効化し、redirectUri は明示的にパスを付ける
-  const redirectUri = AuthSession.makeRedirectUri({ useProxy: false, path: 'auth' });
+  const redirectUri = AuthSession.makeRedirectUri({ path: 'auth' });
   const clientId = WEB_CLIENT_ID;
 
   // Webは client_secret を置けないので token を直接受け取る方式
@@ -103,7 +103,7 @@ export function useGoogleAuth() {
     }
 
     try {
-      const result = await promptAsync({ useProxy: false });
+      const result = await promptAsync();
       if (result?.type === 'success' && result.params.access_token) {
         await finishWithAccessToken(result.params.access_token as string);
         return;
@@ -122,5 +122,5 @@ export function useGoogleAuth() {
     await signOut();
   }, [signOut]);
 
-  return { handleSignIn, handleSignOut, isSignedIn, request, redirectUri, useProxy: false, clientId };
+  return { handleSignIn, handleSignOut, isSignedIn, request, redirectUri, clientId };
 }

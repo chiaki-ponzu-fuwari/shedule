@@ -22,7 +22,6 @@ export function useGoogleAuth() {
     isSignedIn: false,
     request: null as any,
     redirectUri: '',
-    useProxy: false,
     clientId: '',
   };
 }

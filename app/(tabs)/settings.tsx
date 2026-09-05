@@ -54,7 +54,7 @@ export default function SettingsScreen() {
   const [syncing, setSyncing] = useState(false);
   const [googleSyncErrorText, setGoogleSyncErrorText] = useState<string | null>(null);
 
-  const { handleSignIn, handleSignOut, isSignedIn, redirectUri, useProxy, clientId, request: googleAuthRequest } = useGoogleAuth();
+  const { handleSignIn, handleSignOut, isSignedIn, redirectUri, clientId, request: googleAuthRequest } = useGoogleAuth();
 
   const webAlertSimple = (title: string, body?: string) => {
     const msg = body !== undefined ? `${title}\n\n${body}` : title;

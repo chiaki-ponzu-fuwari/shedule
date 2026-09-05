@@ -23,9 +23,7 @@ export function useGoogleAuth() {
   const isSignedIn = useGoogleAuthStore((s) => s.isSignedIn);
 
   const isWeb = Platform.OS === 'web';
-  // Webはproxy認証が不安定になりやすいのでproxyなし、端末はproxyありで安定させる
-  const useProxy = !isWeb;
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: 'scheduleshare', useProxy });
+  const redirectUri = AuthSession.makeRedirectUri();
   const clientId = isWeb ? WEB_CLIENT_ID : (IOS_CLIENT_ID || WEB_CLIENT_ID);
 
   // Expo Goで ExpoCrypto が無い環境があり Code+PKCE が落ちるため、
@@ -63,7 +61,7 @@ export function useGoogleAuth() {
       return;
     }
 
-    const result = await promptAsync({ useProxy });
+    const result = await promptAsync();
 
     if (result?.type === 'success' && result.params.access_token) {
       const accessToken = result.params.access_token as string;
@@ -86,11 +84,11 @@ export function useGoogleAuth() {
     } else if (result?.type === 'success') {
       Alert.alert('ログインに失敗しました', 'トークンが取得できませんでした。リダイレクトURIやクライアントIDを確認してください。');
     }
-  }, [promptAsync, signIn, useProxy, clientId]);
+  }, [promptAsync, signIn, clientId]);
 
   const handleSignOut = useCallback(async () => {
     await signOut();
   }, [signOut]);
 
-  return { handleSignIn, handleSignOut, isSignedIn, request, redirectUri, useProxy, clientId };
+  return { handleSignIn, handleSignOut, isSignedIn, request, redirectUri, clientId };
 }
