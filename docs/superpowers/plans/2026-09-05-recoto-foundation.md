@@ -226,7 +226,7 @@ git add lib/supabase.ts lib/auth/sessionBootstrap.ts store/appSessionStore.ts ho
 git commit -m "feat: allow offline guest startup"
 ```
 
-### Task 3: Clear the existing OAuth type errors
+### Task 3: Clear the existing OAuth type errors without changing registered redirects
 
 - [ ] **Step 1: Add a static failing test**
 
@@ -236,11 +236,20 @@ Create `tests/auth/calendarOAuthContract.test.ts`:
 import fs from 'node:fs';
 
 test('does not pass removed useProxy options to Expo AuthSession', () => {
-  const files = ['hooks/useGoogleAuth.ts', 'hooks/useGoogleAuth.web.ts'];
+  const files = [
+    'hooks/useGoogleAuth.ts',
+    'hooks/useGoogleAuth.web.ts',
+    'hooks/useGoogleAuth.native.ts',
+    'app/(tabs)/settings.tsx',
+  ];
   for (const file of files) {
-    expect(fs.readFileSync(file, 'utf8')).not.toMatch(/makeRedirectUri\(\{[^}]*useProxy/s);
-    expect(fs.readFileSync(file, 'utf8')).not.toMatch(/promptAsync\(\{\s*useProxy/s);
+    expect(fs.readFileSync(file, 'utf8')).not.toMatch(/\buseProxy\b/);
   }
+});
+
+test('keeps the currently registered web Calendar OAuth path', () => {
+  const web = fs.readFileSync('hooks/useGoogleAuth.web.ts', 'utf8');
+  expect(web).toMatch(/makeRedirectUri\(\{\s*path:\s*['"]auth['"]\s*\}\)/);
 });
 ```
 
@@ -251,7 +260,7 @@ Expected: FAIL on current `useProxy` calls.
 
 - [ ] **Step 3: Remove unsupported options**
 
-Use `AuthSession.makeRedirectUri({ scheme: 'recoto', path: 'auth/callback' })` on native, `AuthSession.makeRedirectUri({ path: 'auth/callback' })` on web, and call `promptAsync()` without arguments. Remove `useProxy` from hook return values and from Settings destructuring.
+Call `promptAsync()` without arguments and remove `useProxy` from `makeRedirectUri`, hook return values, and Settings destructuring. Preserve the working Web Calendar OAuth path as `AuthSession.makeRedirectUri({ path: 'auth' })`; changing it would require a coordinated Google Cloud allow-list update. The native hook remains its existing safe disabled stub until the account/native-auth workstream supplies a development-build flow. Task 4 changes the app scheme to `recoto` and updates the fallback hook without changing the registered Web path.
 
 - [ ] **Step 4: Verify GREEN**
 
@@ -268,7 +277,7 @@ Expected: test passes and TypeScript reports zero errors.
 
 ```bash
 git add hooks/useGoogleAuth.ts hooks/useGoogleAuth.web.ts hooks/useGoogleAuth.native.ts 'app/(tabs)/settings.tsx' tests/auth/calendarOAuthContract.test.ts
-git commit -m "fix: update Calendar OAuth redirect options"
+git commit -m "fix: remove obsolete Calendar OAuth proxy options"
 ```
 
 ### Task 4: Unify the Recoto release identity and privacy manifest
