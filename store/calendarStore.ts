@@ -3,12 +3,22 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DayEntry, MiniStamps, NoteItem, PrivacyLevel, RecurringSchedule, SpecialDate, TimeSlot } from '../types';
 import { getDatesForWeekdays } from '../utils/dateUtils';
+import {
+  createOwnerStateStorage,
+  getPersonalOwnerStorage,
+  type OwnerSwitchTarget,
+} from '../lib/account/namespacedStorage';
 
-interface CalendarState {
+export interface CalendarOwnerState {
   entries: Record<string, DayEntry>;
   recurringSchedules: RecurringSchedule[];
   specialDates: SpecialDate[];
   weekStartDay: 0 | 1; // 0=日曜始まり, 1=月曜始まり
+}
+
+interface CalendarState extends CalendarOwnerState {
+  replaceState: (state: CalendarOwnerState) => void;
+  clearForOwnerSwitch: () => void;
 
   // Settings
   setWeekStartDay: (day: 0 | 1) => void;
@@ -50,13 +60,31 @@ function emptyEntry(date: string): DayEntry {
   return { date, miniStamps: {}, privacyLevel: 2 };
 }
 
+function emptyCalendarOwnerState(): CalendarOwnerState {
+  return {
+    entries: {},
+    recurringSchedules: [],
+    specialDates: [],
+    weekStartDay: 1,
+  };
+}
+
+const calendarOwnerStorage = getPersonalOwnerStorage(AsyncStorage);
+
 export const useCalendarStore = create<CalendarState>()(
   persist(
     (set, get) => ({
-      entries: {},
-      recurringSchedules: [],
-      specialDates: [],
-      weekStartDay: 1,
+      ...emptyCalendarOwnerState(),
+
+      replaceState: (state) =>
+        set({
+          entries: { ...state.entries },
+          recurringSchedules: [...state.recurringSchedules],
+          specialDates: [...state.specialDates],
+          weekStartDay: state.weekStartDay,
+        }),
+
+      clearForOwnerSwitch: () => set(emptyCalendarOwnerState()),
 
       setWeekStartDay: (day) => set({ weekStartDay: day }),
 
@@ -388,8 +416,26 @@ export const useCalendarStore = create<CalendarState>()(
         })),
     }),
     {
-      name: 'calendar-storage',
-      storage: createJSONStorage(() => AsyncStorage),
+      name: 'calendar',
+      storage: createJSONStorage(() => createOwnerStateStorage(calendarOwnerStorage)),
     }
   )
 );
+
+export function createCalendarOwnerSwitchTarget(): OwnerSwitchTarget<CalendarOwnerState> {
+  return {
+    snapshot: () => {
+      const state = useCalendarStore.getState();
+      return {
+        entries: { ...state.entries },
+        recurringSchedules: [...state.recurringSchedules],
+        specialDates: [...state.specialDates],
+        weekStartDay: state.weekStartDay,
+      };
+    },
+    clearForOwnerSwitch: () => useCalendarStore.getState().clearForOwnerSwitch(),
+    replaceState: (state) => useCalendarStore.getState().replaceState(state),
+    rehydrate: () => useCalendarStore.persist.rehydrate(),
+    hasHydrated: () => useCalendarStore.persist.hasHydrated(),
+  };
+}
