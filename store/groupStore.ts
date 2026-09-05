@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '../lib/supabase';
+import { getSupabaseClient, requireSupabaseClient } from '../lib/supabase';
 import { devError } from '../utils/devLog';
 import { Group, GroupMember, GroupSharingSettings, SharedEntry, SyncEntryData } from '../types';
+import { useAppSessionStore } from './appSessionStore';
 
 const MEMBER_COLORS = ['#FF6B9D', '#A78BFA', '#34D399', '#60A5FA', '#FBBF24', '#FB923C'];
 
@@ -26,6 +27,25 @@ const FETCH_GROUPS_COOLDOWN_MS = 30_000;
 
 function randomColor(): string {
   return MEMBER_COLORS[Math.floor(Math.random() * MEMBER_COLORS.length)];
+}
+
+function isConnectivityError(detail?: string) {
+  return Boolean(detail && /fetch|network|offline|timeout|timed out|connection/i.test(detail));
+}
+
+function recoverableGroupCloudError(action: string, detail?: string) {
+  const message =
+    `${action}に失敗しました。` +
+    '個人の予定はそのまま利用できます。接続を確認して再度お試しください。' +
+    (detail ? ` (${detail})` : '');
+  if (isConnectivityError(detail)) {
+    useAppSessionStore.getState().setCloudOffline(message);
+  }
+  return new Error(message);
+}
+
+function markGroupCloudOnline() {
+  useAppSessionStore.getState().setCloudOnline?.();
 }
 
 function buildSharedEntryRow(
@@ -130,6 +150,14 @@ interface GroupState {
   fetchGroupSchedules: (groupId: string) => Promise<void>;
 }
 
+async function requireGroupSession() {
+  const userId = await useAppSessionStore.getState().ensureGuestSession('group-action');
+  if (!userId) {
+    throw new Error('グループ機能の認証を確認できませんでした。もう一度お試しください。');
+  }
+  return { client: requireSupabaseClient(), userId };
+}
+
 export const useGroupStore = create<GroupState>()(
   persist(
     (set, get) => ({
@@ -173,10 +201,10 @@ export const useGroupStore = create<GroupState>()(
         })),
 
       createGroup: async (name, color, emoji) => {
-        const { myUserId, myName } = get();
-        if (!myUserId) throw new Error('認証の準備ができていません。しばらく待ってから再度お試しください。');
+        const { client, userId: myUserId } = await requireGroupSession();
+        const { myName } = get();
 
-        const { data: raw, error: rpcErr } = await supabase
+        const { data: raw, error: rpcErr } = await client
           .rpc('create_group_with_owner', {
             p_name: name,
             p_color: color,
@@ -187,8 +215,12 @@ export const useGroupStore = create<GroupState>()(
 
         if (rpcErr || !raw) {
           devError('createGroup rpc', rpcErr?.message ?? undefined);
-          throw new Error(rpcErr?.message ?? 'グループ作成失敗');
+          if (rpcErr?.message?.includes('group_limit_reached')) {
+            throw new Error(rpcErr.message);
+          }
+          throw recoverableGroupCloudError('グループの作成', rpcErr?.message);
         }
+        markGroupCloudOnline();
 
         const groupData = raw as GroupsDbRow;
 
@@ -212,13 +244,13 @@ export const useGroupStore = create<GroupState>()(
       },
 
       joinGroupByCode: async (inviteCode) => {
-        const { myUserId, myName } = get();
-        if (!myUserId) throw new Error('認証の準備ができていません。しばらく待ってから再度お試しください。');
+        const { client, userId: myUserId } = await requireGroupSession();
+        const { myName } = get();
 
         const code = inviteCode.trim().toUpperCase();
         const color = randomColor();
 
-        const { data: raw, error: rpcErr } = await supabase
+        const { data: raw, error: rpcErr } = await client
           .rpc('join_group_by_invite', {
             p_invite: code,
             p_user_name: myName,
@@ -228,18 +260,25 @@ export const useGroupStore = create<GroupState>()(
 
         if (rpcErr) {
           devError('joinGroup rpc', rpcErr.message);
-          throw new Error(rpcErr.message);
+          throw recoverableGroupCloudError('グループへの参加', rpcErr.message);
         }
         if (!raw) {
+          markGroupCloudOnline();
           return null;
         }
 
         const groupData = raw as GroupsDbRow;
 
-        const { data: membersData } = await supabase
+        const { data: membersData, error: membersError } = await client
           .from('group_members')
           .select(GROUP_MEMBERS_SELECT)
           .eq('group_id', groupData.id);
+
+        if (membersError) {
+          devError('joinGroup members', membersError.message);
+          throw recoverableGroupCloudError('グループ情報の取得', membersError.message);
+        }
+        markGroupCloudOnline();
 
         const group = rowToGroup(groupData, membersData ?? []);
 
@@ -255,8 +294,8 @@ export const useGroupStore = create<GroupState>()(
       },
 
       fetchGroups: async (options?: { force?: boolean }) => {
-        const { myUserId } = get();
-        if (!myUserId) {
+        let { myUserId } = get();
+        if (!myUserId && !options?.force) {
           set({ loading: false });
           return;
         }
@@ -269,7 +308,23 @@ export const useGroupStore = create<GroupState>()(
         }
         set({ loading: true });
 
-        const { data: myMemberships, error: memErr } = await supabase
+        let client = getSupabaseClient();
+        if (!myUserId) {
+          try {
+            const session = await requireGroupSession();
+            client = session.client;
+            myUserId = session.userId;
+          } catch (error) {
+            set({ loading: false });
+            throw error;
+          }
+        } else if (!client) {
+          set({ loading: false });
+          if (options?.force) requireSupabaseClient();
+          return;
+        }
+
+        const { data: myMemberships, error: memErr } = await client
           .from('group_members')
           .select('group_id')
           .eq('user_id', myUserId);
@@ -277,11 +332,14 @@ export const useGroupStore = create<GroupState>()(
         if (memErr) {
           devError('fetchGroups group_members', memErr.message);
           set({ loading: false });
+          const error = recoverableGroupCloudError('グループ一覧の更新', memErr.message);
+          if (options?.force) throw error;
           return;
         }
 
         if (!myMemberships || myMemberships.length === 0) {
           lastFetchGroupsAt = Date.now();
+          markGroupCloudOnline();
           set({ loading: false, groups: [], cachedUserId: myUserId });
           return;
         }
@@ -289,17 +347,23 @@ export const useGroupStore = create<GroupState>()(
         const groupIds = myMemberships.map((m: any) => m.group_id);
 
         const [{ data: groupsData, error: gErr }, { data: allMembers, error: mErr }] = await Promise.all([
-          supabase.from('groups').select(GROUPS_SELECT).in('id', groupIds),
-          supabase.from('group_members').select(GROUP_MEMBERS_SELECT).in('group_id', groupIds),
+          client.from('groups').select(GROUPS_SELECT).in('id', groupIds),
+          client.from('group_members').select(GROUP_MEMBERS_SELECT).in('group_id', groupIds),
         ]);
 
         if (gErr || mErr) {
           devError('fetchGroups', gErr?.message ?? mErr?.message);
           set({ loading: false });
+          const error = recoverableGroupCloudError(
+            'グループ一覧の更新',
+            gErr?.message ?? mErr?.message
+          );
+          if (options?.force) throw error;
           return;
         }
 
         if (!groupsData) {
+          markGroupCloudOnline();
           set({ loading: false });
           return;
         }
@@ -310,42 +374,42 @@ export const useGroupStore = create<GroupState>()(
           const group = rowToGroup(g, allMembers ?? []);
           return { ...group, iconUri: iconMap[group.id] };
         });
+        markGroupCloudOnline();
         set({ groups, loading: false, cachedUserId: myUserId });
       },
 
       deleteGroup: async (groupId) => {
-        const { myUserId } = get();
-        if (!myUserId) throw new Error('認証されていません');
+        const { client, userId: myUserId } = await requireGroupSession();
 
         // 先に自分の共有行を消す（FK や RLS で group_members だけ消せないことがある）
-        const { error: seErr } = await supabase
+        const { error: seErr } = await client
           .from('shared_entries')
           .delete()
           .eq('group_id', groupId)
           .eq('user_id', myUserId);
         if (seErr) {
           devError('deleteGroup shared_entries', seErr.message);
-          throw new Error(seErr.message);
+          throw recoverableGroupCloudError('グループ共有データの削除', seErr.message);
         }
 
-        const { error: gmErr } = await supabase
+        const { error: gmErr } = await client
           .from('group_members')
           .delete()
           .eq('group_id', groupId)
           .eq('user_id', myUserId);
         if (gmErr) {
           devError('deleteGroup group_members', gmErr.message);
-          throw new Error(gmErr.message);
+          throw recoverableGroupCloudError('グループからの退出', gmErr.message);
         }
 
-        const { data: remaining, error: remErr } = await supabase
+        const { data: remaining, error: remErr } = await client
           .from('group_members')
           .select('id')
           .eq('group_id', groupId);
         if (remErr) {
           devError('deleteGroup count members', remErr.message);
         } else if (!remaining || remaining.length === 0) {
-          const { error: gErr } = await supabase.from('groups').delete().eq('id', groupId);
+          const { error: gErr } = await client.from('groups').delete().eq('id', groupId);
           if (gErr) devError('deleteGroup groups', gErr.message);
         }
 
@@ -354,43 +418,72 @@ export const useGroupStore = create<GroupState>()(
           cachedUserId: myUserId,
           sharedEntries: { ...state.sharedEntries, [groupId]: [] },
         }));
+        markGroupCloudOnline();
       },
 
       updateSharedMemo: async (groupId, memo) => {
-        await supabase.from('groups').update({ shared_memo: memo }).eq('id', groupId);
         set((state) => ({
           groups: state.groups.map((g) => (g.id === groupId ? { ...g, sharedMemo: memo } : g)),
         }));
+        try {
+          const { client } = await requireGroupSession();
+          const { error } = await client.from('groups').update({ shared_memo: memo }).eq('id', groupId);
+          if (error) {
+            devError('updateSharedMemo', error.message);
+            recoverableGroupCloudError('共有メモの更新', error.message);
+            return;
+          }
+          markGroupCloudOnline();
+        } catch (error) {
+          devError('updateSharedMemo', error instanceof Error ? error.message : String(error));
+        }
       },
 
       updateGroupName: async (groupId, name) => {
         const trimmed = name.trim();
         if (!trimmed) return;
-        await supabase.from('groups').update({ name: trimmed }).eq('id', groupId);
         set((state) => ({
           groups: state.groups.map((g) => (g.id === groupId ? { ...g, name: trimmed } : g)),
         }));
+        try {
+          const { client } = await requireGroupSession();
+          const { error } = await client.from('groups').update({ name: trimmed }).eq('id', groupId);
+          if (error) {
+            devError('updateGroupName', error.message);
+            recoverableGroupCloudError('グループ名の更新', error.message);
+            return;
+          }
+          markGroupCloudOnline();
+        } catch (error) {
+          devError('updateGroupName', error instanceof Error ? error.message : String(error));
+        }
       },
 
       syncMySchedule: async (groupId, entries) => {
-        const { myUserId, myName, groups } = get();
-        if (!myUserId) throw new Error('認証の準備ができていません。');
+        const { client, userId: myUserId } = await requireGroupSession();
+        const { myName, groups } = get();
         const myMember = groups.find((g) => g.id === groupId)?.members.find((m) => m.id === myUserId);
         const myColor = myMember?.color ?? '#A78BFA';
         const syncDisplayName = (myMember?.name ?? myName).trim() || myName;
 
         if (entries.length === 0) {
-          await supabase.from('shared_entries').delete().eq('group_id', groupId).eq('user_id', myUserId);
+          const { error } = await client
+            .from('shared_entries')
+            .delete()
+            .eq('group_id', groupId)
+            .eq('user_id', myUserId);
+          if (error) throw recoverableGroupCloudError('共有予定の更新', error.message);
+          markGroupCloudOnline();
           return;
         }
 
-        const { data: existing, error: selErr } = await supabase
+        const { data: existing, error: selErr } = await client
           .from('shared_entries')
           .select(SHARED_ENTRIES_SELECT)
           .eq('group_id', groupId)
           .eq('user_id', myUserId);
 
-        if (selErr) throw new Error(selErr.message);
+        if (selErr) throw recoverableGroupCloudError('共有予定の取得', selErr.message);
 
         const byDate = new Map<string, any>();
         for (const r of existing ?? []) {
@@ -436,31 +529,35 @@ export const useGroupStore = create<GroupState>()(
         }
 
         if (toDeleteIds.length > 0) {
-          const { error: delErr } = await supabase.from('shared_entries').delete().in('id', toDeleteIds);
-          if (delErr) throw new Error(delErr.message);
+          const { error: delErr } = await client.from('shared_entries').delete().in('id', toDeleteIds);
+          if (delErr) throw recoverableGroupCloudError('共有予定の更新', delErr.message);
         }
 
         if (toInsert.length > 0) {
-          const { error: insertErr } = await supabase.from('shared_entries').insert(toInsert);
+          const { error: insertErr } = await client.from('shared_entries').insert(toInsert);
           if (insertErr) {
             if (insertErr.message?.includes('time_slots')) {
               const rowsWithoutTs = toInsert.map(({ time_slots, ...rest }) => rest);
-              const { error: retryErr } = await supabase.from('shared_entries').insert(rowsWithoutTs);
-              if (retryErr) throw new Error(retryErr.message);
+              const { error: retryErr } = await client.from('shared_entries').insert(rowsWithoutTs);
+              if (retryErr) {
+                throw recoverableGroupCloudError('共有予定の更新', retryErr.message);
+              }
             } else {
-              throw new Error(insertErr.message);
+              throw recoverableGroupCloudError('共有予定の更新', insertErr.message);
             }
           }
         }
 
         const runUpdate = async (id: string, patch: Record<string, unknown>) => {
-          const { error: uErr } = await supabase.from('shared_entries').update(patch).eq('id', id);
+          const { error: uErr } = await client.from('shared_entries').update(patch).eq('id', id);
           if (uErr) {
             if (uErr.message?.includes('time_slots')) {
               const { time_slots: _ts, ...rest } = patch;
-              const { error: r2 } = await supabase.from('shared_entries').update(rest).eq('id', id);
-              if (r2) throw new Error(r2.message);
-            } else throw new Error(uErr.message);
+              const { error: r2 } = await client.from('shared_entries').update(rest).eq('id', id);
+              if (r2) throw recoverableGroupCloudError('共有予定の更新', r2.message);
+            } else {
+              throw recoverableGroupCloudError('共有予定の更新', uErr.message);
+            }
           }
         };
 
@@ -469,11 +566,13 @@ export const useGroupStore = create<GroupState>()(
           const slice = toUpdate.slice(i, i + chunk);
           await Promise.all(slice.map(({ id, patch }) => runUpdate(id, patch)));
         }
+        markGroupCloudOnline();
       },
 
       fetchGroupSchedules: async (groupId) => {
+        const { client } = await requireGroupSession();
         const { min, max } = sharedEntryFetchDateBounds();
-        const { data, error } = await supabase
+        const { data, error } = await client
           .from('shared_entries')
           .select(SHARED_ENTRIES_SELECT)
           .eq('group_id', groupId)
@@ -483,8 +582,9 @@ export const useGroupStore = create<GroupState>()(
 
         if (error) {
           devError('fetchGroupSchedules', error.message);
-          throw new Error(error.message);
+          throw recoverableGroupCloudError('共有予定の取得', error.message);
         }
+        markGroupCloudOnline();
 
         const entries: SharedEntry[] = (data ?? []).map((row: any) => ({
           userId: row.user_id,
@@ -517,6 +617,22 @@ export const useGroupStore = create<GroupState>()(
         sharingSettings: state.sharingSettings,
         groupIconUris: state.groupIconUris,
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<GroupState>;
+        const merged = { ...currentState, ...persisted, myUserId: currentState.myUserId };
+
+        // Auth 復元が AsyncStorage 復元より先に完了しても、別ユーザーの cache を復活させない。
+        if (currentState.myUserId && persisted.cachedUserId !== currentState.myUserId) {
+          return {
+            ...merged,
+            groups: [],
+            cachedUserId: currentState.myUserId,
+            sharedEntries: {},
+          };
+        }
+
+        return merged;
+      },
     }
   )
 );

@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SafeAreaView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Haptics } from '../../utils/haptics';
+import { useAppSessionStore } from '../../store/appSessionStore';
 import { useGroupStore } from '../../store/groupStore';
 import { colors } from '../../constants/colors';
 import { useTranslation } from '../../constants/i18n';
@@ -14,20 +15,30 @@ export default function JoinGroupScreen() {
   const { code } = useLocalSearchParams<{ code: string }>();
   const router = useRouter();
   const joinGroupByCode = useGroupStore((s) => s.joinGroupByCode);
+  const ensureGuestSession = useAppSessionStore((s) => s.ensureGuestSession);
 
   const [status, setStatus] = useState<'idle' | 'joining' | 'success' | 'error'>('idle');
   const [groupName, setGroupName] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   const handleJoin = async () => {
     if (!code) return;
     setStatus('joining');
+    setErrorMessage('');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const group = await joinGroupByCode(code);
-    if (group) {
-      setGroupName(group.name);
-      setStatus('success');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else {
+    try {
+      await ensureGuestSession('group-action');
+      const group = await joinGroupByCode(code);
+      if (group) {
+        setGroupName(group.name);
+        setStatus('success');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return;
+      }
+      setStatus('error');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
       setStatus('error');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
@@ -77,7 +88,7 @@ export default function JoinGroupScreen() {
           <>
             <Ionicons name="close-circle" size={64} color="#EF4444" />
             <Text style={styles.title}>{t('join.failTitle')}</Text>
-            <Text style={styles.desc}>{t('join.failBody')}</Text>
+            <Text style={styles.desc}>{errorMessage || t('join.failBody')}</Text>
             <TouchableOpacity style={styles.btn} onPress={handleJoin}>
               <Text style={styles.btnText}>{t('join.retry')}</Text>
             </TouchableOpacity>

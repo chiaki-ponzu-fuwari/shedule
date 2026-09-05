@@ -20,6 +20,7 @@ const hapticNotify = (type = Haptics.NotificationFeedbackType.Success) => {
 };
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAppSessionStore } from '../../store/appSessionStore';
 import { useGroupStore } from '../../store/groupStore';
 import { colors } from '../../constants/colors';
 import { Group } from '../../types';
@@ -54,6 +55,9 @@ export default function GroupsScreen() {
   const myName = useGroupStore((s) => s.myName);
   const myUserId = useGroupStore((s) => s.myUserId);
   const setMyName = useGroupStore((s) => s.setMyName);
+  const identityMode = useAppSessionStore((s) => s.identityMode);
+  const ensureGuestSession = useAppSessionStore((s) => s.ensureGuestSession);
+  const visibleGroups = identityMode === 'hydrating' ? [] : groups;
 
   const [createVisible, setCreateVisible] = useState(false);
   const [joinVisible, setJoinVisible] = useState(false);
@@ -66,7 +70,9 @@ export default function GroupsScreen() {
   const [nicknameColor, setNicknameColor] = useState(MEMBER_COLORS[0]);
 
   // IDからグループを都度取得（無限ループ防止）
-  const detailGroup = detailGroupId ? (groups.find((g) => g.id === detailGroupId) ?? null) : null;
+  const detailGroup = detailGroupId
+    ? (visibleGroups.find((g) => g.id === detailGroupId) ?? null)
+    : null;
 
   // Create form
   const [newName, setNewName] = useState('');
@@ -103,8 +109,8 @@ export default function GroupsScreen() {
     setCreateError('');
     hapticImpact();
     try {
+      await ensureGuestSession('group-action');
       const group = await createGroup(newName.trim(), newColor, newEmoji);
-      setCreating(false);
       if (group) {
         if (newIconUri) setGroupIconUri(group.id, newIconUri);
         setNewName('');
@@ -114,13 +120,14 @@ export default function GroupsScreen() {
       }
     } catch (e: any) {
       devError('handleCreate', e?.message ?? String(e));
-      setCreating(false);
       const msg = e?.message ?? String(e);
       if (typeof msg === 'string' && msg.includes('group_limit_reached')) {
         setCreateError(t('groups.createLimit', { max: 10 }));
       } else {
         setCreateError(msg);
       }
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -147,14 +154,42 @@ export default function GroupsScreen() {
     if (!joinCode.trim()) return;
     setJoining(true);
     hapticImpact();
-    const group = await joinGroupByCode(joinCode);
-    setJoining(false);
-    if (group) {
-      setJoinCode('');
-      setJoinVisible(false);
-      hapticNotify();
-    } else {
-      Alert.alert(t('groups.errTitle'), t('groups.codeNotFound'));
+    try {
+      await ensureGuestSession('group-action');
+      const group = await joinGroupByCode(joinCode);
+      if (group) {
+        setJoinCode('');
+        setJoinVisible(false);
+        hapticNotify();
+      } else {
+        Alert.alert(t('groups.errTitle'), t('groups.codeNotFound'));
+      }
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      devError('handleJoin', msg);
+      if (Platform.OS === 'web') {
+        window.alert(`${t('groups.errTitle')}\n\n${msg}`);
+      } else {
+        Alert.alert(t('groups.errTitle'), msg);
+      }
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    hapticSelect();
+    try {
+      await ensureGuestSession('group-action');
+      await fetchGroups({ force: true });
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      devError('handleRefreshGroups', msg);
+      if (Platform.OS === 'web') {
+        window.alert(`${t('groups.errTitle')}\n\n${msg}`);
+      } else {
+        Alert.alert(t('groups.errTitle'), msg);
+      }
     }
   };
 
@@ -207,7 +242,7 @@ export default function GroupsScreen() {
       <LinearGradient colors={['#DBEAFE', '#EFF6FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <Text style={styles.headerTitle}>{t('groups.header')}</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => { fetchGroups({ force: true }); hapticSelect(); }}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => void handleRefresh()}>
             <Ionicons name="refresh" size={18} color={colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerBtn} onPress={() => setJoinVisible(true)}>
@@ -220,11 +255,11 @@ export default function GroupsScreen() {
       </LinearGradient>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-        {loading && groups.length === 0 ? (
+        {loading && visibleGroups.length === 0 ? (
           <View style={styles.emptyState}>
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
-        ) : groups.length === 0 ? (
+        ) : visibleGroups.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyEmoji}>👥</Text>
             <Text style={styles.emptyTitle}>{t('groups.emptyTitle')}</Text>
@@ -243,7 +278,7 @@ export default function GroupsScreen() {
               <Text style={styles.joinBannerText}>{t('groups.joinBanner')}</Text>
               <Ionicons name="chevron-forward" size={14} color={colors.textLight} />
             </TouchableOpacity>
-            {groups.map((group) => (
+            {visibleGroups.map((group) => (
               <TouchableOpacity
                 key={group.id}
                 style={styles.groupCard}

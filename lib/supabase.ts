@@ -1,14 +1,17 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const url = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? '';
-const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? '';
+const CONFIGURATION_ERROR_MESSAGE =
+  'グループ機能の接続設定が完了していません。' +
+  '個人の予定はそのまま利用できます。設定後にもう一度お試しください。';
 
-if (!url || !anonKey) {
-  throw new Error(
-    'Supabase の URL / キーが未設定です。プロジェクト直下に .env を作成し、' +
-      'EXPO_PUBLIC_SUPABASE_URL と EXPO_PUBLIC_SUPABASE_ANON_KEY を設定してください（.env.example 参照）。'
-  );
+let singleton: SupabaseClient | null = null;
+let singletonConfigurationKey: string | null = null;
+
+function readConfiguration() {
+  const url = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? '';
+  const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? '';
+  return { url, anonKey };
 }
 
 /**
@@ -69,11 +72,38 @@ const authStorage = {
  * セキュリティ: anon キーはクライアント埋め込み前提。service_role は絶対に入れないこと。
  * Web 本番では XSS 対策（依存の更新・危ない HTML 混入の回避）と CSP 検討が有効。
  */
-export const supabase = createClient(url, anonKey, {
-  auth: {
-    storage: authStorage,
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: false,
-  },
-});
+export function isSupabaseConfigured(): boolean {
+  const { url, anonKey } = readConfiguration();
+  return Boolean(url && anonKey);
+}
+
+export function getSupabaseClient(): SupabaseClient | null {
+  const { url, anonKey } = readConfiguration();
+  if (!url || !anonKey) return null;
+
+  const configurationKey = `${url}\n${anonKey}`;
+  if (singleton && singletonConfigurationKey === configurationKey) return singleton;
+
+  try {
+    singleton = createClient(url, anonKey, {
+      auth: {
+        storage: authStorage,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+      },
+    });
+    singletonConfigurationKey = configurationKey;
+    return singleton;
+  } catch {
+    singleton = null;
+    singletonConfigurationKey = null;
+    return null;
+  }
+}
+
+export function requireSupabaseClient(): SupabaseClient {
+  const client = getSupabaseClient();
+  if (!client) throw new Error(CONFIGURATION_ERROR_MESSAGE);
+  return client;
+}
