@@ -816,7 +816,7 @@ describe('group detail memo save behavior', () => {
     Object.defineProperty(reactNative.Platform, 'OS', { configurable: true, value: 'web' });
     const testing = require('@testing-library/react-native/pure') as typeof import('@testing-library/react-native/pure');
     const { GroupDetailSheet } = require('../../components/groups/GroupDetailSheet') as typeof import('../../components/groups/GroupDetailSheet');
-    const rendered = testing.render(
+    const createGroupDetail = (sharedMemo: string) =>
       React.createElement(GroupDetailSheet, {
         group: {
           id: 'group-1',
@@ -825,17 +825,55 @@ describe('group detail memo save behavior', () => {
           emoji: '👥',
           inviteCode: 'CODE12',
           members: [{ id: 'member-1', name: 'Member', color: '#000000' }],
-          sharedMemo: 'first draft',
+          sharedMemo,
           createdAt: '2026-09-05T00:00:00.000Z',
         },
         visible: true,
         onClose: jest.fn(),
         onDelete: jest.fn(),
         onShare: jest.fn(),
-      })
-    );
-    return { ...rendered, ...testing };
+      });
+    const renderWithMemo = (sharedMemo: string) => testing.render(createGroupDetail(sharedMemo));
+    const rendered = renderWithMemo('first draft');
+    return { ...rendered, ...testing, createGroupDetail, renderWithMemo };
   }
+
+  test('reconciles a confirmed memo after reopen without saving the stale draft on blur', async () => {
+    let resolveSave!: () => void;
+    const save = new Promise<void>((resolve) => {
+      resolveSave = resolve;
+    });
+    const updateSharedMemo = jest.fn(() => save);
+    const {
+      getByPlaceholderText,
+      fireEvent,
+      act,
+      waitFor,
+      unmount,
+      createGroupDetail,
+      renderWithMemo,
+    } = renderGroupDetail(updateSharedMemo);
+    const firstInput = getByPlaceholderText('groupDetail.memoPh');
+
+    fireEvent.changeText(firstInput, 'latest draft');
+    fireEvent(firstInput, 'blur');
+    expect(updateSharedMemo).toHaveBeenCalledTimes(1);
+    unmount();
+
+    const reopened = renderWithMemo('first draft');
+    await act(async () => {
+      resolveSave();
+      await save;
+    });
+    reopened.rerender(createGroupDetail('latest draft'));
+
+    await waitFor(() => {
+      expect(reopened.getByPlaceholderText('groupDetail.memoPh').props.value).toBe('latest draft');
+    });
+    fireEvent(reopened.getByPlaceholderText('groupDetail.memoPh'), 'blur');
+    expect(updateSharedMemo).toHaveBeenCalledTimes(1);
+    reopened.unmount();
+  });
 
   test('forwards each blur with its draft to the store-owned save queue', async () => {
     let resolveFirst!: () => void;
@@ -849,12 +887,13 @@ describe('group detail memo save behavior', () => {
     const { getByPlaceholderText, fireEvent, act, unmount } = renderGroupDetail(updateSharedMemo);
     const memoInput = getByPlaceholderText('groupDetail.memoPh');
 
+    fireEvent.changeText(memoInput, 'first edit');
     fireEvent(memoInput, 'blur');
     fireEvent.changeText(memoInput, 'latest draft');
     fireEvent(memoInput, 'blur');
 
     expect(updateSharedMemo).toHaveBeenCalledTimes(2);
-    expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'first draft');
+    expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'first edit');
     expect(updateSharedMemo).toHaveBeenNthCalledWith(2, 'group-1', 'latest draft');
 
     await act(async () => {
@@ -882,6 +921,7 @@ describe('group detail memo save behavior', () => {
     const { getByPlaceholderText, fireEvent, act, waitFor, unmount } = renderGroupDetail(updateSharedMemo);
     const memoInput = getByPlaceholderText('groupDetail.memoPh');
 
+    fireEvent.changeText(memoInput, 'pending draft');
     fireEvent(memoInput, 'blur');
     fireEvent.changeText(memoInput, 'latest draft');
     await act(async () => {
@@ -891,7 +931,7 @@ describe('group detail memo save behavior', () => {
     await waitFor(() => expect(updateSharedMemo).toHaveBeenCalledTimes(2));
 
     expect(confirm).toHaveBeenCalledTimes(2);
-    expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'first draft');
+    expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'pending draft');
     expect(updateSharedMemo).toHaveBeenNthCalledWith(2, 'group-1', 'latest draft');
     unmount();
   });

@@ -781,6 +781,7 @@ describe('group detail lifecycle safety', () => {
     };
     const rendered = testing.render(React.createElement(GroupDetailSheet, props));
     const memoInput = rendered.getByPlaceholderText('groupDetail.memoPh');
+    testing.fireEvent.changeText(memoInput, 'edited memo');
     testing.fireEvent(memoInput, 'blur');
     if (lifecycle === 'unmount') {
       rendered.unmount();

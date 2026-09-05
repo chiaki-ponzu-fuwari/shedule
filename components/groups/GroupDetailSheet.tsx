@@ -122,6 +122,8 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
   const [tab, setTab] = useState<Tab>('info');
   const [memoEdit, setMemoEdit] = useState(group.sharedMemo ?? '');
   const memoEditRef = useRef(group.sharedMemo ?? '');
+  const memoConfirmedRef = useRef(group.sharedMemo ?? '');
+  const memoDirtyRef = useRef(false);
   const memoSaveVersion = useRef(0);
   const nameSaveVersion = useRef(0);
   const mountedRef = useRef(true);
@@ -171,11 +173,24 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
     nameSaveInFlight.current = false;
     if (!visible) return;
     const memo = group.sharedMemo ?? '';
+    memoConfirmedRef.current = memo;
+    memoDirtyRef.current = false;
     memoEditRef.current = memo;
     setMemoEdit(memo);
     setNameDraft(group.name);
     setNameEditing(false);
   }, [visible, group.id]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const confirmedMemo = group.sharedMemo ?? '';
+    memoConfirmedRef.current = confirmedMemo;
+    if (!memoDirtyRef.current || memoEditRef.current === confirmedMemo) {
+      memoDirtyRef.current = false;
+      memoEditRef.current = confirmedMemo;
+      setMemoEdit(confirmedMemo);
+    }
+  }, [visible, group.id, group.sharedMemo]);
 
   useEffect(() => {
     // groupが更新されたとき追従（名前・アイコン）
@@ -221,13 +236,18 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
 
   const handleSharedMemoChange = (text: string) => {
     memoEditRef.current = text;
+    memoDirtyRef.current = text !== memoConfirmedRef.current;
     setMemoEdit(text);
   };
 
   const handleSharedMemoSave = async () => {
+    const memo = memoEditRef.current;
+    if (memo === memoConfirmedRef.current) {
+      memoDirtyRef.current = false;
+      return;
+    }
     const saveVersion = memoSaveVersion.current + 1;
     memoSaveVersion.current = saveVersion;
-    const memo = memoEditRef.current;
     const requestGroupId = group.id;
     try {
       await updateSharedMemo(requestGroupId, memo);
