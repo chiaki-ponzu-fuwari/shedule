@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "schedule-98b25",
     "public": "public",
     "ignore": [
       "firebase.json",

@@ -188,4 +188,16 @@ describe('legal site hosting and privacy posture', () => {
     expect(config).toContain('YOUR_FIREBASE_PROJECT_ID');
     expect(config).not.toContain('schedule-98b25');
   });
+
+  test('pins production hosting to the verified Schedule Firebase project and site', () => {
+    const projectConfig = JSON.parse(
+      fs.readFileSync(path.join(ROOT, 'legal-site/.firebaserc'), 'utf8'),
+    ) as { projects?: { default?: string } };
+    const hostingConfig = JSON.parse(
+      fs.readFileSync(path.join(ROOT, 'legal-site/firebase.json'), 'utf8'),
+    ) as { hosting?: { site?: string } };
+
+    expect(projectConfig.projects?.default).toBe('schedule-98b25');
+    expect(hostingConfig.hosting?.site).toBe('schedule-98b25');
+  });
 });

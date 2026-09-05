@@ -48,6 +48,13 @@ function base64Url(value: Uint8Array | string): string {
 }
 
 describe('Edge Function request security', () => {
+  test('documents every provider allowlist required by deployed functions', () => {
+    const environmentExample = read('.env.example');
+
+    expect(environmentExample).toMatch(/^GOOGLE_OAUTH_CLIENT_IDS=/m);
+    expect(environmentExample).toMatch(/^APPLE_NOTIFICATION_CLIENT_IDS=/m);
+  });
+
   test('creates an unpredictable URL-safe merge nonce and a stable SHA-256 digest', async () => {
     const first = randomNonce(32);
     const second = randomNonce(32);
