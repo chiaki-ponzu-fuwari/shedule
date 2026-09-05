@@ -28,6 +28,8 @@ export interface OutboxMutation {
   entityId: string;
   operation: 'upsert' | 'delete';
   payload: Record<string, unknown> | null;
+  /** null means insert-if-absent; a number is the server revision required for CAS. */
+  baseRevision: number | null;
   createdAt: string;
   attempts: number;
 }
