@@ -165,8 +165,6 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onOpenE
 
   // 新しい画像を選んで画像スタンプとして保存 → その日に設定
   const handleAddImageStamp = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,

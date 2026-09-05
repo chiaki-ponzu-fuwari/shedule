@@ -85,8 +85,6 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
       Alert.alert(t('weekly.photoLimitTitle'), t('weekly.photoLimitBody'));
       return;
     }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,

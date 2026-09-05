@@ -133,11 +133,6 @@ export default function GroupsScreen() {
   };
 
   const pickGroupIconImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(t('settings.photoPermissionTitle'), t('settings.photoPermissionBody'));
-      return;
-    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,

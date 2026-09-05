@@ -17,6 +17,13 @@ const expectedIdentity = {
   androidPackage: 'com.herac.recoto',
 };
 
+const expectedAssets = {
+  appIcon: './assets/images/icon.png',
+  splashImage: './assets/images/icon.png',
+  notificationIcon: './assets/images/notification-icon.png',
+  iosAppIconFilename: 'AppIcon-1024.png',
+};
+
 function addFailure(message) {
   failures.push(message);
 }
@@ -70,18 +77,69 @@ function verifyLocalAssets(config) {
   }
 }
 
+function pluginOptions(expo, pluginName) {
+  const entry = Array.isArray(expo.plugins)
+    ? expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === pluginName)
+    : undefined;
+  return Array.isArray(entry) ? entry[1] : undefined;
+}
+
+function verifyReleaseAssetMappings(expo) {
+  expectEqual('expo.icon', expo.icon, expectedAssets.appIcon);
+  expectEqual('expo.splash.image', expo.splash?.image, expectedAssets.splashImage);
+  expectEqual(
+    'expo-notifications icon',
+    pluginOptions(expo, 'expo-notifications')?.icon,
+    expectedAssets.notificationIcon,
+  );
+
+  const contentsPath = 'ios/app/Images.xcassets/AppIcon.appiconset/Contents.json';
+  const contents = readJson(contentsPath);
+  if (!contents) return;
+  const iosAppIcon = Array.isArray(contents.images)
+    ? contents.images.find(
+        (image) =>
+          image.idiom === 'universal' && image.platform === 'ios' && image.size === '1024x1024',
+      )
+    : undefined;
+  expectEqual(
+    'iOS AppIcon Contents filename',
+    iosAppIcon?.filename,
+    expectedAssets.iosAppIconFilename,
+  );
+
+  const iosAppIconPath = path.join(
+    root,
+    'ios/app/Images.xcassets/AppIcon.appiconset',
+    expectedAssets.iosAppIconFilename,
+  );
+  if (!fs.existsSync(iosAppIconPath) || !fs.statSync(iosAppIconPath).isFile()) {
+    addFailure(`iOS AppIcon file is missing: ${expectedAssets.iosAppIconFilename}`);
+  }
+}
+
 function verifyProductionLegalUrls(config) {
   if (process.env.NODE_ENV !== 'production') return;
 
+  const isLegalUrlField = (field) =>
+    /(?:privacy|terms|legal).*(?:url|uri)|(?:url|uri).*(?:privacy|terms|legal)/i.test(field);
+
   visit(config, 'expo', (value, currentPath) => {
-    const isLegalField =
-      /(?:privacy|terms|legal).*(?:url|uri)|(?:url|uri).*(?:privacy|terms|legal)/i.test(
-        currentPath,
-      );
-    if (isLegalField && typeof value === 'string' && /^http:\/\//i.test(value)) {
+    if (isLegalUrlField(currentPath) && typeof value === 'string' && /^http:\/\//i.test(value)) {
       addFailure(`Production legal URL must use HTTPS: ${currentPath}`);
     }
   });
+
+  for (const [name, value] of Object.entries(process.env)) {
+    if (
+      name.startsWith('EXPO_PUBLIC_') &&
+      isLegalUrlField(name) &&
+      typeof value === 'string' &&
+      /^http:\/\//i.test(value)
+    ) {
+      addFailure(`Production public legal URL must use HTTPS: ${name}`);
+    }
+  }
 }
 
 function configuredPublicEnvironmentNames() {
@@ -208,6 +266,7 @@ if (appConfig?.expo) {
   expectEqual('expo.scheme', expo.scheme, expectedIdentity.scheme);
   expectEqual('expo.ios.bundleIdentifier', expo.ios?.bundleIdentifier, expectedIdentity.iosBundleIdentifier);
   expectEqual('expo.android.package', expo.android?.package, expectedIdentity.androidPackage);
+  verifyReleaseAssetMappings(expo);
   verifyLocalAssets(expo);
   verifyProductionLegalUrls(expo);
 } else if (appConfig) {

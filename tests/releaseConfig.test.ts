@@ -68,6 +68,8 @@ function createVerifierFixture(): string {
     'ios/app/Info.plist',
     'ios/app/PrivacyInfo.xcprivacy',
     'ios/app.xcodeproj/project.pbxproj',
+    'ios/app/Images.xcassets/AppIcon.appiconset/AppIcon-1024.png',
+    'ios/app/Images.xcassets/AppIcon.appiconset/Contents.json',
     'assets/images/icon.png',
     'assets/images/notification-icon.png',
   ];
@@ -342,5 +344,79 @@ describe('release configuration verifier', () => {
     } finally {
       fs.rmSync(fixtureRoot, { recursive: true, force: true });
     }
+  });
+
+  test('rejects existing files assigned to the wrong Expo release asset fields', () => {
+    const fixtureRoot = createVerifierFixture();
+    try {
+      const config = readJson<{ expo: Record<string, any> }>(APP_JSON_PATH);
+      const notifications = findPlugin(config.expo, 'expo-notifications');
+      if (!notifications) throw new Error('expo-notifications plugin is required by this fixture');
+
+      config.expo.icon = './assets/images/notification-icon.png';
+      config.expo.splash.image = './assets/images/notification-icon.png';
+      notifications.icon = './assets/images/icon.png';
+      fs.writeFileSync(path.join(fixtureRoot, 'app.json'), `${JSON.stringify(config, null, 2)}\n`);
+
+      const result = spawnSync(process.execPath, [VERIFIER_PATH], {
+        cwd: fixtureRoot,
+        encoding: 'utf8',
+        env: { ...process.env, NODE_ENV: 'production' },
+      });
+      const output = `${result.stdout}${result.stderr}`;
+
+      expect(result.status).not.toBe(0);
+      expect(output).toContain('expo.icon');
+      expect(output).toContain('expo.splash.image');
+      expect(output).toContain('expo-notifications icon');
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an alternate iOS AppIcon filename even when that file exists', () => {
+    const fixtureRoot = createVerifierFixture();
+    try {
+      const contentsPath = path.join(
+        fixtureRoot,
+        'ios/app/Images.xcassets/AppIcon.appiconset/Contents.json',
+      );
+      const contents = readJson<{ images: Array<{ filename?: string }> }>(contentsPath);
+      contents.images[0].filename = 'Alternate-1024.png';
+      fs.writeFileSync(contentsPath, `${JSON.stringify(contents, null, 2)}\n`);
+      fs.copyFileSync(
+        path.join(fixtureRoot, 'ios/app/Images.xcassets/AppIcon.appiconset/AppIcon-1024.png'),
+        path.join(fixtureRoot, 'ios/app/Images.xcassets/AppIcon.appiconset/Alternate-1024.png'),
+      );
+
+      const result = spawnSync(process.execPath, [VERIFIER_PATH], {
+        cwd: fixtureRoot,
+        encoding: 'utf8',
+        env: { ...process.env, NODE_ENV: 'production' },
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}${result.stderr}`).toContain('AppIcon-1024.png');
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an insecure production public legal URL without printing its value', () => {
+    const insecureUrl = 'http://example.com/legal';
+    const result = spawnSync(process.execPath, [VERIFIER_PATH], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        EXPO_PUBLIC_LEGAL_BASE_URL: insecureUrl,
+      },
+    });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status).not.toBe(0);
+    expect(output).toContain('EXPO_PUBLIC_LEGAL_BASE_URL');
+    expect(output).not.toContain(insecureUrl);
   });
 });
