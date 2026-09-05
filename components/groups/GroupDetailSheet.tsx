@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, Modal, TouchableWithoutFeedback, TouchableOpacity, Pressable,
   StyleSheet, ScrollView, TextInput, ActivityIndicator, Platform, Dimensions, Image, Alert,
@@ -14,6 +14,7 @@ import { formatShortDateParts, formatCalendarMonthTitle, getWeekdayLabels } from
 import { useTranslation } from '../../constants/i18n';
 import * as ImagePicker from 'expo-image-picker';
 import { compressPickedImageUri } from '../../utils/compressPickedImage';
+import { devError } from '../../utils/devLog';
 import { TimelineHourLabel } from '../ui/TimelineHourLabel';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -131,6 +132,7 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
   const [detailTab, setDetailTab] = useState<'memo' | 'timeschedule'>('memo');
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState(group.name);
+  const nameSaveInFlight = useRef(false);
 
   const updateSharedMemo = useGroupStore((s) => s.updateSharedMemo);
   const updateGroupName = useGroupStore((s) => s.updateGroupName);
@@ -169,6 +171,29 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
   const toggleSetting = (key: keyof GroupSharingSettings) => {
     hapticSelect();
     setSharingSettings(group.id, { ...sharingSettings, [key]: !sharingSettings[key] });
+  };
+
+  const handleGroupNameSave = async () => {
+    if (nameSaveInFlight.current) return;
+    nameSaveInFlight.current = true;
+    try {
+      await updateGroupName(group.id, nameDraft);
+      setNameEditing(false);
+    } catch (error) {
+      devError('updateGroupName UI', error instanceof Error ? error.message : String(error));
+      Alert.alert(t('groups.errTitle'), t('groupDetail.nameUpdateErr'));
+    } finally {
+      nameSaveInFlight.current = false;
+    }
+  };
+
+  const handleSharedMemoSave = async () => {
+    try {
+      await updateSharedMemo(group.id, memoEdit);
+    } catch (error) {
+      // The session store exposes this as a nonblocking cloud error; keep memo typing uninterrupted.
+      devError('updateSharedMemo UI', error instanceof Error ? error.message : String(error));
+    }
   };
 
   const handleSync = async () => {
@@ -325,14 +350,8 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
                       onChangeText={setNameDraft}
                       autoFocus
                       returnKeyType="done"
-                      onSubmitEditing={async () => {
-                        await updateGroupName(group.id, nameDraft);
-                        setNameEditing(false);
-                      }}
-                      onBlur={async () => {
-                        await updateGroupName(group.id, nameDraft);
-                        setNameEditing(false);
-                      }}
+                      onSubmitEditing={() => void handleGroupNameSave()}
+                      onBlur={() => void handleGroupNameSave()}
                     />
                   ) : (
                     <View style={styles.groupNameRow}>
@@ -456,7 +475,8 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
                     <TextInput
                       style={styles.memoInput}
                       value={memoEdit}
-                      onChangeText={(text) => { setMemoEdit(text); updateSharedMemo(group.id, text); }}
+                      onChangeText={setMemoEdit}
+                      onBlur={() => void handleSharedMemoSave()}
                       placeholder={t('groupDetail.memoPh')}
                       placeholderTextColor={colors.textLight}
                       multiline

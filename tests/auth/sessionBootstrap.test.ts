@@ -299,9 +299,16 @@ describe('group cloud entry points', () => {
             },
           ],
           cachedUserId: 'old-user',
-          myName: 'わたし',
-          sharingSettings: {},
-          groupIconUris: {},
+          myName: 'Old user',
+          sharingSettings: {
+            'old-group': {
+              shareMain: false,
+              shareMini: true,
+              shareNotes: true,
+              shareTimeSchedule: true,
+            },
+          },
+          groupIconUris: { 'old-group': 'file:///old-user-icon.png' },
         },
         version: 0,
       })
@@ -311,27 +318,127 @@ describe('group cloud entry points', () => {
     expect(groupStore.getState().myUserId).toBe('new-user');
     expect(groupStore.getState().cachedUserId).toBe('new-user');
     expect(groupStore.getState().groups).toEqual([]);
+    expect(groupStore.getState()).toMatchObject({
+      myName: 'わたし',
+      loading: false,
+      sharingSettings: {},
+      sharedEntries: {},
+      groupIconUris: {},
+    });
   });
 
-  test('keeps fire-and-forget memo and name edits from leaking rejected promises', async () => {
-    jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    const ensureGuestSession = jest.fn(async () => {
-      throw new Error('グループ機能の接続設定が完了していません。');
-    });
-
+  test('clears every user-scoped cache when the authenticated user changes', () => {
     jest.resetModules();
     jest.doMock('../../lib/supabase', () => ({
       getSupabaseClient: () => null,
       requireSupabaseClient: jest.fn(),
     }));
     jest.doMock('../../store/appSessionStore', () => ({
-      useAppSessionStore: { getState: () => ({ ensureGuestSession }) },
+      useAppSessionStore: { getState: () => ({ ensureGuestSession: jest.fn() }) },
+    }));
+
+    const groupStore = (require('../../store/groupStore') as typeof import('../../store/groupStore')).useGroupStore;
+    groupStore.setState({
+      cachedUserId: 'old-user',
+      myUserId: 'old-user',
+      myName: 'Old user',
+      loading: true,
+      groups: [{ id: 'old-group' } as never],
+      sharingSettings: {
+        'old-group': {
+          shareMain: false,
+          shareMini: true,
+          shareNotes: true,
+          shareTimeSchedule: true,
+        },
+      },
+      sharedEntries: { 'old-group': [{ id: 'old-entry' } as never] },
+      groupIconUris: { 'old-group': 'file:///old-user-icon.png' },
+    });
+
+    groupStore.getState().setAuthUserId('new-user');
+
+    expect(groupStore.getState()).toMatchObject({
+      cachedUserId: 'new-user',
+      myUserId: 'new-user',
+      myName: 'わたし',
+      loading: false,
+      groups: [],
+      sharingSettings: {},
+      sharedEntries: {},
+      groupIconUris: {},
+    });
+  });
+
+  test('rejects failed memo and name writes while recording the recoverable cloud error', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const ensureGuestSession = jest.fn(async () => 'group-user');
+    const setCloudError = jest.fn();
+    const updateEq = jest.fn(async () => ({ error: { message: 'permission denied' } }));
+    const client = {
+      from: jest.fn(() => ({
+        update: jest.fn(() => ({ eq: updateEq })),
+      })),
+    };
+
+    jest.resetModules();
+    jest.doMock('../../lib/supabase', () => ({
+      getSupabaseClient: () => client,
+      requireSupabaseClient: () => client,
+    }));
+    jest.doMock('../../store/appSessionStore', () => ({
+      useAppSessionStore: { getState: () => ({ ensureGuestSession, setCloudError }) },
     }));
 
     const groupStore = (require('../../store/groupStore') as typeof import('../../store/groupStore')).useGroupStore;
 
-    await expect(groupStore.getState().updateSharedMemo('group-id', 'memo')).resolves.toBeUndefined();
-    await expect(groupStore.getState().updateGroupName('group-id', 'name')).resolves.toBeUndefined();
+    await expect(groupStore.getState().updateSharedMemo('group-id', 'memo')).rejects.toThrow(
+      /個人の予定はそのまま利用できます/
+    );
+    await expect(groupStore.getState().updateGroupName('group-id', 'name')).rejects.toThrow(
+      /個人の予定はそのまま利用できます/
+    );
+    expect(setCloudError).toHaveBeenCalledTimes(2);
+    expect(setCloudError).toHaveBeenLastCalledWith(
+      expect.stringContaining('個人の予定はそのまま利用できます')
+    );
+  });
+
+});
+
+describe('local persistence hydration', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.resetModules();
+  });
+
+  test('falls back to local defaults instead of blocking forever when storage reads fail', async () => {
+    const onReady = jest.fn();
+    const unsubscribe = jest.fn();
+    const source = {
+      persist: {
+        hasHydrated: jest.fn(() => false),
+        onFinishHydration: jest.fn(() => unsubscribe),
+        rehydrate: jest.fn(async () => {
+          throw new Error('storage unavailable');
+        }),
+      },
+    };
+    const { observeLocalStoreHydration } = require('../../hooks/useLocalStoresHydrated') as {
+      observeLocalStoreHydration: (
+        stores: typeof source[],
+        ready: () => void
+      ) => () => void;
+    };
+
+    const cleanup = observeLocalStoreHydration([source], onReady);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(source.persist.rehydrate).toHaveBeenCalledTimes(1);
+    expect(onReady).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -399,14 +506,40 @@ describe('Supabase auth observer', () => {
   });
 });
 
-test('root layout observes auth without blocking local UI or requesting notification permission', () => {
+test('root layout waits only for persisted local stores before rendering the router', () => {
   const fs = require('node:fs') as typeof import('node:fs');
   const source = fs.readFileSync('app/_layout.tsx', 'utf8');
+  const hydrationHook = fs.readFileSync('hooks/useLocalStoresHydrated.ts', 'utf8');
 
   expect(source).toContain('useSupabaseAuth();');
+  expect(source).toContain('const localStoresHydrated = useLocalStoresHydrated();');
+  expect(source).toMatch(/if\s*\(\s*!localStoresHydrated\s*\)/);
+  expect(source).toContain('<ActivityIndicator');
   expect(source).not.toContain('requestNotificationPermission');
   expect(source).not.toMatch(/if\s*\(\s*!ready\s*\)/);
   expect(source).not.toMatch(/if\s*\(\s*error\s*\)/);
+
+  for (const store of ['useCalendarStore', 'useStampStore', 'useLocaleStore', 'useGroupStore']) {
+    expect(hydrationHook).toContain(store);
+  }
+  expect(hydrationHook).toContain('.persist.hasHydrated()');
+  expect(hydrationHook).toContain('.persist.onFinishHydration(');
+  expect(hydrationHook).toContain('.persist.rehydrate()');
+  expect(hydrationHook).toContain('Promise.allSettled(');
+});
+
+test('group detail catches recoverable name and memo update failures', () => {
+  const fs = require('node:fs') as typeof import('node:fs');
+  const source = fs.readFileSync('components/groups/GroupDetailSheet.tsx', 'utf8');
+
+  expect(source).toMatch(/const handleGroupNameSave = async \(\) => \{[\s\S]*?catch \(error[\s\S]*?Alert\.alert/);
+  expect(source).toContain("t('groupDetail.nameUpdateErr')");
+  expect(source).toContain('onSubmitEditing={() => void handleGroupNameSave()}');
+  expect(source).toContain('onBlur={() => void handleGroupNameSave()}');
+  expect(source).toMatch(/const handleSharedMemoSave = async \(\) => \{[\s\S]*?catch \(error/);
+  expect(source).toContain('onChangeText={setMemoEdit}');
+  expect(source).toContain('onBlur={() => void handleSharedMemoSave()}');
+  expect(source).not.toMatch(/onChangeText=\{[^}]*updateSharedMemo/);
 });
 
 test('group screens connect only from explicit action handlers', () => {

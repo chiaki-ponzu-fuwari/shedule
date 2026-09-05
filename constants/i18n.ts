@@ -264,6 +264,7 @@ const ja: Messages = {
   'groups.nicknameOk': '決定',
 
   'groupDetail.fetchErr': 'スケジュールの取得に失敗しました',
+  'groupDetail.nameUpdateErr': 'グループ名を保存できませんでした。接続を確認して再度お試しください。',
   'groupDetail.memberLine': '{n}人のメンバー',
   'groupDetail.tabInfo': 'グループ情報',
   'groupDetail.tabSettings': '共有設定',
@@ -577,6 +578,7 @@ const en: Messages = {
   'groups.nicknameOk': 'Continue',
 
   'groupDetail.fetchErr': 'Could not load schedule',
+  'groupDetail.nameUpdateErr': 'Could not save the group name. Check your connection and try again.',
   'groupDetail.memberLine': '{n} members',
   'groupDetail.tabInfo': 'Info',
   'groupDetail.tabSettings': 'Sharing',

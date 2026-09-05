@@ -13,6 +13,7 @@ interface AppSessionState {
   error: string | null;
   setObservedSession: (configured: boolean, user: SessionUser | null) => void;
   setCloudOffline: (message: string) => void;
+  setCloudError: (message: string) => void;
   setCloudOnline: () => void;
   ensureGuestSession: (reason?: GuestSessionReason) => Promise<string>;
 }
@@ -41,6 +42,10 @@ export const useAppSessionStore = create<AppSessionState>((set, get) => ({
 
   setCloudOffline: (message) => {
     set({ cloudAvailability: 'offline', error: message });
+  },
+
+  setCloudError: (message) => {
+    set({ cloudAvailability: 'online', error: message });
   },
 
   setCloudOnline: () => {

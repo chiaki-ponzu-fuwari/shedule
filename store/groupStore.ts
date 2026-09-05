@@ -40,6 +40,8 @@ function recoverableGroupCloudError(action: string, detail?: string) {
     (detail ? ` (${detail})` : '');
   if (isConnectivityError(detail)) {
     useAppSessionStore.getState().setCloudOffline(message);
+  } else {
+    useAppSessionStore.getState().setCloudError(message);
   }
   return new Error(message);
 }
@@ -182,8 +184,12 @@ export const useGroupStore = create<GroupState>()(
             return {
               myUserId: id,
               cachedUserId: id,
+              myName: 'わたし',
+              loading: false,
               groups: [],
+              sharingSettings: {},
               sharedEntries: {},
+              groupIconUris: {},
             };
           }
           return { myUserId: id, cachedUserId: id };
@@ -425,18 +431,13 @@ export const useGroupStore = create<GroupState>()(
         set((state) => ({
           groups: state.groups.map((g) => (g.id === groupId ? { ...g, sharedMemo: memo } : g)),
         }));
-        try {
-          const { client } = await requireGroupSession();
-          const { error } = await client.from('groups').update({ shared_memo: memo }).eq('id', groupId);
-          if (error) {
-            devError('updateSharedMemo', error.message);
-            recoverableGroupCloudError('共有メモの更新', error.message);
-            return;
-          }
-          markGroupCloudOnline();
-        } catch (error) {
-          devError('updateSharedMemo', error instanceof Error ? error.message : String(error));
+        const { client } = await requireGroupSession();
+        const { error } = await client.from('groups').update({ shared_memo: memo }).eq('id', groupId);
+        if (error) {
+          devError('updateSharedMemo', error.message);
+          throw recoverableGroupCloudError('共有メモの更新', error.message);
         }
+        markGroupCloudOnline();
       },
 
       updateGroupName: async (groupId, name) => {
@@ -445,18 +446,13 @@ export const useGroupStore = create<GroupState>()(
         set((state) => ({
           groups: state.groups.map((g) => (g.id === groupId ? { ...g, name: trimmed } : g)),
         }));
-        try {
-          const { client } = await requireGroupSession();
-          const { error } = await client.from('groups').update({ name: trimmed }).eq('id', groupId);
-          if (error) {
-            devError('updateGroupName', error.message);
-            recoverableGroupCloudError('グループ名の更新', error.message);
-            return;
-          }
-          markGroupCloudOnline();
-        } catch (error) {
-          devError('updateGroupName', error instanceof Error ? error.message : String(error));
+        const { client } = await requireGroupSession();
+        const { error } = await client.from('groups').update({ name: trimmed }).eq('id', groupId);
+        if (error) {
+          devError('updateGroupName', error.message);
+          throw recoverableGroupCloudError('グループ名の更新', error.message);
         }
+        markGroupCloudOnline();
       },
 
       syncMySchedule: async (groupId, entries) => {
@@ -627,7 +623,11 @@ export const useGroupStore = create<GroupState>()(
             ...merged,
             groups: [],
             cachedUserId: currentState.myUserId,
+            myName: 'わたし',
+            loading: false,
+            sharingSettings: {},
             sharedEntries: {},
+            groupIconUris: {},
           };
         }
 
