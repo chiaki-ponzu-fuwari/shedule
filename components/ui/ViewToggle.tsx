@@ -1,13 +1,14 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import { CalendarView } from '../../types';
 import { colors } from '../../constants/colors';
+import { useTranslation } from '../../constants/i18n';
 
-const TABS: { key: CalendarView; label: string }[] = [
-  { key: 'monthly', label: '月' },
-  { key: 'weekly',  label: '週' },
-  { key: 'daily',   label: '日' },
+const TAB_KEYS: { key: CalendarView; labelKey: string }[] = [
+  { key: 'monthly', labelKey: 'view.month' },
+  { key: 'weekly', labelKey: 'view.week' },
+  { key: 'daily', labelKey: 'view.day' },
 ];
 
 interface Props {
@@ -16,7 +17,12 @@ interface Props {
 }
 
 export function ViewToggle({ value, onChange }: Props) {
-  const activeIndex = TABS.findIndex((t) => t.key === value);
+  const { t } = useTranslation();
+  const tabs = useMemo(
+    () => TAB_KEYS.map((row) => ({ ...row, label: t(row.labelKey) })),
+    [t]
+  );
+  const activeIndex = tabs.findIndex((tab) => tab.key === value);
   const slideAnim = useRef(new Animated.Value(activeIndex)).current;
 
   useEffect(() => {
@@ -47,12 +53,12 @@ export function ViewToggle({ value, onChange }: Props) {
           },
         ]}
       />
-      {TABS.map((tab) => (
+      {tabs.map((tab) => (
         <TouchableOpacity
           key={tab.key}
           style={styles.tab}
           onPress={() => {
-            Haptics.selectionAsync();
+            Haptics.selectionAsync().catch(() => {});
             onChange(tab.key);
           }}
         >
@@ -87,7 +93,7 @@ const styles = StyleSheet.create({
     height: 32,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    shadowColor: '#A78BFA',
+    shadowColor: '#3B82F6',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,

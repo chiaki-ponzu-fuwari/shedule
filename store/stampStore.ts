@@ -72,7 +72,7 @@ export const useStampStore = create<StampState>()(
         get().stamps.filter((s) => s.isImageStamp === true),
     }),
     {
-      name: 'stamp-storage-v8',
+      name: 'stamp-storage-v15',
       storage: createJSONStorage(() => AsyncStorage),
     }
   )

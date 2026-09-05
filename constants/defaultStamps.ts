@@ -2,16 +2,20 @@ import { Stamp } from '../types';
 
 // メインスタンプ（デフォルト4種）
 export const DEFAULT_MAIN_STAMPS: Stamp[] = [
-  { id: 'main_day',   text: '日勤', bgColor: '#F97316', textColor: '#FFFFFF', isDefault: true, isMain: true },
-  { id: 'main_night', text: '夜勤', bgColor: '#2D1B69', textColor: '#C4B5FD', isDefault: true, isMain: true },
+  { id: 'main_day',   text: '日勤', bgColor: '#D4699A', textColor: '#FFFFFF', isDefault: true, isMain: true },
+  { id: 'main_night', text: '夜勤', bgColor: '#4A8FB5', textColor: '#FFFFFF', isDefault: true, isMain: true },
   { id: 'main_work',  text: '出勤', bgColor: '#60A5FA', textColor: '#FFFFFF', isDefault: true, isMain: true },
   { id: 'main_off',   text: '休',   bgColor: '#9CA3AF', textColor: '#FFFFFF', isDefault: true, isMain: true },
+  { id: 'main_juku',  text: '塾',   bgColor: '#A78BFA', textColor: '#FFFFFF', isDefault: true, isMain: true },
+  { id: 'main_test',  text: 'テスト', bgColor: '#E8855A', textColor: '#FFFFFF', isDefault: true, isMain: true },
 ];
 
 // ミニスタンプ（デフォルト2種）
 export const DEFAULT_MINI_STAMPS: Stamp[] = [
-  { id: 'mini_gym',   text: 'ジム', bgColor: '#F97316', textColor: '#FFFFFF', isDefault: true, isMain: false },
-  { id: 'mini_study', text: '勉強', bgColor: '#FBBF24', textColor: '#78350F', isDefault: true, isMain: false },
+  { id: 'mini_gym',      text: 'ジム', bgColor: '#F97316', textColor: '#FFFFFF', isDefault: true, isMain: false },
+  { id: 'mini_study',    text: '勉強', bgColor: '#FBBF24', textColor: '#78350F', isDefault: true, isMain: false },
+  { id: 'mini_meeting',  text: '会議', bgColor: '#6B7280', textColor: '#FFFFFF', isDefault: true, isMain: false },
+  { id: 'mini_trip',     text: '出張', bgColor: '#0EA5E9', textColor: '#FFFFFF', isDefault: true, isMain: false },
 ];
 
 // デフォルト画像スタンプ（アイコン型）

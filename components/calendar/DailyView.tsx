@@ -1,27 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Modal, TouchableWithoutFeedback, Alert,
+  TextInput, Modal, TouchableWithoutFeedback, Alert, Switch,
+  Linking, LayoutChangeEvent, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import { useCalendarStore } from '../../store/calendarStore';
 import { useStampStore } from '../../store/stampStore';
 import { addDays, formatDate, formatFullDate } from '../../utils/dateUtils';
 import { colors } from '../../constants/colors';
-import { TimeSlot } from '../../types';
+import { useTranslation } from '../../constants/i18n';
+import { NoteItem, TimeSlot } from '../../types';
 import { WheelPicker } from '../ui/WheelPicker';
+import { TimelineHourLabel } from '../ui/TimelineHourLabel';
+import { HorizontalDateStrip } from '../ui/HorizontalDateStrip';
+import { requestNotificationPermission, scheduleNotification, cancelNotification } from '../../utils/notifications';
 
-const HOUR_H = 21;
+/** 初回レイアウト前・極小画面用のフォールバック（px / 1時間） */
+const DEFAULT_HOUR_H = 22;
+const MIN_HOUR_H = 16;
+/** 24:00 ラベル行（短くして 0〜23 時の行をできるだけ広く） */
+const END_HOUR_ROW_RATIO = 0.07;
+const END_HOUR_ROW_MIN = 12;
 const START_HOUR = 0;
 const END_HOUR = 24;
-const LABEL_W = 52;
+const LABEL_W = 58;
+
+const HOUR_LABEL_FONT = Platform.select({
+  ios: 'Menlo',
+  android: 'monospace',
+  default: 'monospace',
+});
 
 const SLOT_COLORS = [
-  '#FF6B9D', '#A78BFA', '#60A5FA', '#34D399',
+  '#FF6B9D', '#3B82F6', '#60A5FA', '#34D399',
   '#FBBF24', '#F97316', '#FB7185', '#818CF8',
 ];
+const NOTE_ITEM_DEFAULT_COLOR = '#60A5FA';
+const GRID_TOP_PAD = 4;
+const GRID_BOTTOM_PAD = 2;
 
 function toMin(t: string): number {
   const [h, m] = t.split(':').map(Number);
@@ -74,74 +93,221 @@ const tp = StyleSheet.create({
 interface Props {
   currentDate: string;
   onDayChange: (d: string) => void;
-  onStampPress: () => void;
+  onStampPress?: () => void;
 }
 
 export function DailyView({ currentDate, onDayChange, onStampPress }: Props) {
+  const { t, locale } = useTranslation();
   const entry = useCalendarStore((s) => s.getEntry(currentDate));
   const addTimeSlot = useCalendarStore((s) => s.addTimeSlot);
   const updateTimeSlot = useCalendarStore((s) => s.updateTimeSlot);
   const removeTimeSlot = useCalendarStore((s) => s.removeTimeSlot);
+  const setNoteItems = useCalendarStore((s) => s.setNoteItems);
+  const setDailyGoal = useCalendarStore((s) => s.setDailyGoal);
   const specialDates = useCalendarStore((s) => s.specialDates);
   const getStamp = useStampStore((s) => s.getStamp);
 
-  const mainStamp = entry?.mainStampId ? getStamp(entry.mainStampId) : undefined;
-  const leftMini  = entry?.miniStamps?.left  ? getStamp(entry.miniStamps.left)  : undefined;
-  const rightMini = entry?.miniStamps?.right ? getStamp(entry.miniStamps.right) : undefined;
+  const [goalText, setGoalText] = useState(entry?.dailyGoal ?? '');
+
+  // デイリー（タイムスケジュール）ではメイン/ミニ表記は表示しない
 
   const curDate = new Date(currentDate + 'T00:00:00');
   const timeSlots: TimeSlot[] = entry?.timeSlots ?? [];
+  // 月カレンダーの予定（時間あり・対応するTimeSlotがないもの）をDailyViewに表示
+  const timeSlotIds = new Set(timeSlots.map(s => s.id));
+  const noteItemEvents = (entry?.noteItems ?? []).filter(
+    (n) => n.time && !(n.fromTimeSlotId && timeSlotIds.has(n.fromTimeSlotId))
+  );
   const special = specialDates.find(s => s.month === curDate.getMonth() + 1 && s.day === curDate.getDate());
+
+  useEffect(() => {
+    setGoalText(entry?.dailyGoal ?? '');
+  }, [currentDate]);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editId, setEditId] = useState<string | undefined>(undefined);
+  const [editNoteItemId, setEditNoteItemId] = useState<string | undefined>(undefined);
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime]     = useState('10:00');
   const [title, setTitle]         = useState('');
+  const [url, setUrl]             = useState('');
   const [slotColor, setSlotColor] = useState(SLOT_COLORS[0]);
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [editNotifId, setEditNotifId] = useState<string | undefined>(undefined);
+  const [reflectToMonthly, setReflectToMonthly] = useState(false);
 
   const openAdd = (hour = 9) => {
     const h = String(hour).padStart(2,'0');
     const h2 = String(Math.min(hour + 1, 23)).padStart(2,'0');
     setEditId(undefined);
+    setEditNoteItemId(undefined);
     setStartTime(`${h}:00`);
     setEndTime(`${h2}:00`);
     setTitle('');
+    setUrl('');
     setSlotColor(SLOT_COLORS[timeSlots.length % SLOT_COLORS.length]);
+    setNotifEnabled(false);
+    setEditNotifId(undefined);
+    setReflectToMonthly(false);
     setModalVisible(true);
   };
 
   const openEdit = (slot: TimeSlot) => {
     setEditId(slot.id);
+    setEditNoteItemId(undefined);
     setStartTime(slot.startTime);
     setEndTime(slot.endTime);
     setTitle(slot.title);
+    setUrl(slot.url ?? '');
     setSlotColor(slot.color);
+    setNotifEnabled(slot.notificationEnabled ?? false);
+    setEditNotifId(slot.notificationId);
+    setReflectToMonthly(slot.reflectToMonthly ?? false);
     setModalVisible(true);
   };
 
-  const handleSave = () => {
+  const openEditNoteItem = (item: NoteItem) => {
+    setEditId(undefined);
+    setEditNoteItemId(item.id);
+    setStartTime(item.time ?? '09:00');
+    setEndTime(item.endTime ?? '10:00');
+    setTitle(item.text);
+    setUrl(item.url ?? '');
+    setSlotColor(item.color ?? NOTE_ITEM_DEFAULT_COLOR);
+    setNotifEnabled(item.notificationEnabled ?? false);
+    setEditNotifId(item.notificationId);
+    setReflectToMonthly(false);
+    setModalVisible(true);
+  };
+
+  const handleSave = async () => {
     if (!title.trim()) return;
+    let notifId = editNotifId;
+    const rangeSep = locale === 'en' ? '–' : '〜';
+    const timeRangeBody = `${startTime}${rangeSep}${endTime}`;
+
+    if (editNoteItemId) {
+      // NoteItemの編集
+      if (notifEnabled) {
+        const granted = await requestNotificationPermission();
+        if (granted) {
+          if (notifId) await cancelNotification(notifId);
+          const result = await scheduleNotification(
+            currentDate, startTime, t('daily.notif5min', { title }), timeRangeBody
+          );
+          notifId = result.id ?? undefined;
+        }
+      } else if (notifId) {
+        await cancelNotification(notifId);
+        notifId = undefined;
+      }
+      const currentItems = entry?.noteItems ?? [];
+      const updatedItem = currentItems.find((n) => n.id === editNoteItemId);
+      if (updatedItem) {
+        const updated: NoteItem = {
+          ...updatedItem,
+          text: title,
+          time: startTime,
+          endTime,
+          url: url.trim() ? url.trim() : undefined,
+          color: slotColor,
+          notificationEnabled: notifEnabled,
+          notificationId: notifId,
+        };
+        const newItems = currentItems.map((n) => n.id === editNoteItemId ? updated : n);
+        setNoteItems(currentDate, newItems);
+        // TimeSlotへ同期
+        if (updated.fromTimeSlotId) {
+          updateTimeSlot(currentDate, updated.fromTimeSlotId, {
+            title: updated.text,
+            startTime: updated.time ?? '',
+            endTime: updated.endTime ?? '',
+            url: updated.url,
+            notificationEnabled: updated.notificationEnabled ?? false,
+            notificationId: updated.notificationId,
+          });
+        }
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setModalVisible(false);
+      return;
+    }
+
+    // TimeSlotの通知は「タイムスケジュール上でONなら常に5分前通知」
+    if (notifEnabled) {
+      const granted = await requestNotificationPermission();
+      if (granted) {
+        if (notifId) await cancelNotification(notifId);
+        const result = await scheduleNotification(
+          currentDate,
+          startTime,
+          t('daily.notif5min', { title }),
+          timeRangeBody
+        );
+        notifId = result.id ?? undefined;
+      }
+    } else if (notifId) {
+      await cancelNotification(notifId);
+      notifId = undefined;
+    }
+
+    const slotData = {
+      startTime, endTime, title, color: slotColor,
+      url: url.trim() ? url.trim() : undefined,
+      notificationEnabled: notifEnabled,
+      notificationId: notifId,
+      reflectToMonthly,
+    };
+
     if (editId) {
-      updateTimeSlot(currentDate, editId, { startTime, endTime, title, color: slotColor });
+      updateTimeSlot(currentDate, editId, slotData);
     } else {
-      addTimeSlot(currentDate, { startTime, endTime, title, color: slotColor });
+      addTimeSlot(currentDate, slotData);
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setModalVisible(false);
   };
 
   const handleDelete = () => {
-    if (!editId) return;
-    Alert.alert('削除', 'この予定を削除しますか？', [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: '削除', style: 'destructive', onPress: () => {
-        removeTimeSlot(currentDate, editId);
+    if (!editId && !editNoteItemId) return;
+    Alert.alert(t('daily.deleteEventTitle'), t('daily.deleteEventMsg'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.delete'), style: 'destructive', onPress: async () => {
+        if (editNotifId) await cancelNotification(editNotifId);
+        if (editNoteItemId) {
+          const currentItems = entry?.noteItems ?? [];
+          setNoteItems(currentDate, currentItems.filter((n) => n.id !== editNoteItemId));
+        } else if (editId) {
+          removeTimeSlot(currentDate, editId);
+        }
         setModalVisible(false);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }},
     ]);
   };
+
+  const openUrl = (raw?: string) => {
+    if (!raw) return;
+    const normalized = raw.startsWith('http') ? raw : `https://${raw}`;
+    Linking.openURL(normalized).catch(() => {});
+  };
+
+  const [timelineViewportH, setTimelineViewportH] = useState(0);
+  const onTimelineViewportLayout = (e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > 0) setTimelineViewportH(h);
+  };
+  const innerTimelineH = Math.max(0, timelineViewportH);
+  const timelineInner =
+    innerTimelineH > 0 ? innerTimelineH - GRID_TOP_PAD - GRID_BOTTOM_PAD : 0;
+  const endHourRowH =
+    innerTimelineH > 0
+      ? Math.max(END_HOUR_ROW_MIN, timelineInner * END_HOUR_ROW_RATIO)
+      : DEFAULT_HOUR_H * 0.25;
+  const hourRowH =
+    innerTimelineH > 0
+      ? Math.max(MIN_HOUR_H, (timelineInner - endHourRowH) / 24)
+      : DEFAULT_HOUR_H;
 
   // グリッド用時間配列
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => i + START_HOUR);
@@ -149,103 +315,127 @@ export function DailyView({ currentDate, onDayChange, onStampPress }: Props) {
   return (
     <View style={styles.container}>
       {/* ── ヘッダー ── */}
-      <LinearGradient colors={['#FFE4F0','#EDE9FE']} start={{x:0,y:0}} end={{x:1,y:0}} style={styles.header}>
+      <LinearGradient colors={['#DBEAFE','#EFF6FF']} start={{x:0,y:0}} end={{x:1,y:0}} style={styles.header}>
         <View style={styles.dateRow}>
           <TouchableOpacity style={styles.navBtn} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onDayChange(formatDate(addDays(curDate,-1))); }}>
             <Ionicons name="chevron-back" size={20} color={colors.primary} />
           </TouchableOpacity>
-          <Text style={styles.dateLabel}>{formatFullDate(currentDate)}</Text>
+          <Text style={styles.dateLabel}>{formatFullDate(currentDate, locale)}</Text>
           <TouchableOpacity style={styles.navBtn} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onDayChange(formatDate(addDays(curDate,1))); }}>
             <Ionicons name="chevron-forward" size={20} color={colors.primary} />
           </TouchableOpacity>
         </View>
-
-        <View style={styles.headerBottom}>
-          <TouchableOpacity style={styles.stampRow} onPress={onStampPress} activeOpacity={0.8}>
-            {mainStamp ? (
-              <View style={[styles.mainBadge,{backgroundColor:mainStamp.bgColor}]}>
-                <Text style={[styles.mainBadgeText,{color:mainStamp.textColor}]}>{mainStamp.text}</Text>
-              </View>
-            ) : (
-              <View style={styles.badgeEmpty}><Text style={styles.badgeEmptyText}>メイン＋</Text></View>
-            )}
-            <View style={styles.miniBadges}>
-              {leftMini ? (
-                <View style={[styles.miniBadge,{backgroundColor:leftMini.bgColor}]}>
-                  <Text style={[styles.miniBadgeText,{color:leftMini.textColor}]}>{leftMini.text}</Text>
-                </View>
-              ) : (
-                <View style={styles.badgeEmpty}><Text style={styles.badgeEmptyText}>左＋</Text></View>
-              )}
-              {rightMini ? (
-                <View style={[styles.miniBadge,{backgroundColor:rightMini.bgColor}]}>
-                  <Text style={[styles.miniBadgeText,{color:rightMini.textColor}]}>{rightMini.text}</Text>
-                </View>
-              ) : (
-                <View style={styles.badgeEmpty}><Text style={styles.badgeEmptyText}>右＋</Text></View>
-              )}
-            </View>
-            {special && (
-              <View style={styles.specialLabelRow}>
-                <Ionicons name={(special.emoji as any) || 'gift-outline'} size={13} color={special.color} />
-                <Text style={[styles.specialLabel, { color: special.color }]}>{special.name}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          {/* ＋ボタン */}
-          <TouchableOpacity style={styles.addFab} onPress={() => openAdd()}>
-            <Ionicons name="add" size={22} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
+        <HorizontalDateStrip selectedDate={currentDate} onDateChange={onDayChange} />
       </LinearGradient>
 
-      {/* ── タイムライン ── */}
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* 通常フローで高さを確定 → イベントを絶対オーバーレイ */}
-        <View style={styles.gridContainer}>
+      {/* ── 本日の目標 ── */}
+      <View style={styles.goalSection}>
+        <TextInput
+          style={styles.goalInput}
+          value={goalText}
+          onChangeText={setGoalText}
+          onBlur={() => setDailyGoal(currentDate, goalText)}
+          placeholder={t('daily.goalPlaceholder')}
+          placeholderTextColor={colors.textLight}
+          multiline
+        />
+      </View>
 
-          {/* グリッド行（通常フロー） */}
-          {hours.map((hour) => (
-            <TouchableOpacity
-              key={hour}
-              style={styles.hourRow}
-              onPress={() => openAdd(hour)}
-              activeOpacity={0.3}
-            >
-              <Text style={styles.hourLabel}>{String(hour).padStart(2,'0')}:00</Text>
+      {/* ── タイムライン（flex 内の高さを 24h で均等割） ── */}
+      <View style={styles.timelineViewport} onLayout={onTimelineViewportLayout}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={
+            innerTimelineH > 0
+              ? { minHeight: innerTimelineH }
+              : undefined
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {/* 通常フローで高さを確定 → イベントを絶対オーバーレイ */}
+          <View style={styles.gridContainer}>
+            {/* 0:00の前に少し余白 */}
+            <View style={{ height: GRID_TOP_PAD }} />
+
+            {/* グリッド行（通常フロー） */}
+            {hours.map((hour) => (
+              <TouchableOpacity
+                key={hour}
+                style={[styles.hourRow, { height: hourRowH }]}
+                onPress={() => openAdd(hour)}
+                activeOpacity={0.3}
+              >
+                <TimelineHourLabel hour={hour} style={styles.hourLabel} />
+                <View style={styles.hourLine} />
+              </TouchableOpacity>
+            ))}
+            {/* 24:00 終端ライン */}
+            <View style={[styles.hourRowEnd, { height: endHourRowH }]}>
+              <TimelineHourLabel hour={24} style={styles.hourLabel} />
               <View style={styles.hourLine} />
-            </TouchableOpacity>
-          ))}
-          {/* 24:00 終端ライン */}
-          <View style={styles.hourRowEnd}>
-            <Text style={styles.hourLabel}>24:00</Text>
-            <View style={styles.hourLine} />
-          </View>
+            </View>
+            {/* 24:00の後にも少し余白 */}
+            <View style={{ height: GRID_BOTTOM_PAD }} />
 
-          {/* イベントブロック（絶対オーバーレイ） */}
-          {timeSlots.map((slot) => {
-            const startM = toMin(slot.startTime) - START_HOUR * 60;
-            const endM   = toMin(slot.endTime)   - START_HOUR * 60;
-            const top    = (startM / 60) * HOUR_H;
-            const height = Math.max(((endM - startM) / 60) * HOUR_H, 26);
+            {/* イベントブロック（絶対オーバーレイ） */}
+            {timeSlots.map((slot) => {
+              const startM = toMin(slot.startTime) - START_HOUR * 60;
+              const endM = toMin(slot.endTime) - START_HOUR * 60;
+              const top = GRID_TOP_PAD + (startM / 60) * hourRowH;
+              const height = Math.max(
+                ((endM - startM) / 60) * hourRowH,
+                Math.max(24, hourRowH * 0.28)
+              );
+              return (
+                <TouchableOpacity
+                  key={slot.id}
+                  style={[styles.eventBlock, { top, height, backgroundColor: slot.color }]}
+                  onPress={() => { Haptics.selectionAsync(); openEdit(slot); }}
+                  onLongPress={() => slot.url ? openUrl(slot.url) : undefined}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.eventTitle} numberOfLines={1}>{slot.title}</Text>
+                  {height >= hourRowH * 0.55 && (
+                    <Text style={styles.eventTime}>{slot.startTime}{locale === 'en' ? '–' : '〜'}{slot.endTime}</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+
+          {/* 月カレ予定（タップで編集可）*/}
+          {noteItemEvents.map((item) => {
+            const startM = toMin(item.time!) - START_HOUR * 60;
+            const endM = item.endTime ? toMin(item.endTime) - START_HOUR * 60 : startM + 30;
+            const top = GRID_TOP_PAD + (startM / 60) * hourRowH;
+            const height = Math.max(
+              ((endM - startM) / 60) * hourRowH,
+              Math.max(20, hourRowH * 0.24)
+            );
             return (
               <TouchableOpacity
-                key={slot.id}
-                style={[styles.eventBlock, { top, height, backgroundColor: slot.color }]}
-                onPress={() => { Haptics.selectionAsync(); openEdit(slot); }}
+                key={item.id}
+                style={[styles.noteEventBlock, { top, height, backgroundColor: item.color ?? NOTE_ITEM_DEFAULT_COLOR }]}
+                onPress={() => { Haptics.selectionAsync(); openEditNoteItem(item); }}
+                onLongPress={() => item.url ? openUrl(item.url) : undefined}
                 activeOpacity={0.85}
               >
-                <Text style={styles.eventTitle} numberOfLines={1}>{slot.title}</Text>
-                {height >= 36 && (
-                  <Text style={styles.eventTime}>{slot.startTime}〜{slot.endTime}</Text>
+                <Text style={styles.noteEventTitle} numberOfLines={1}>{item.text}</Text>
+                {height >= hourRowH * 0.5 && (
+                  <Text style={styles.noteEventTime}>
+                    {item.time}{item.endTime ? `${locale === 'en' ? '–' : '〜'}${item.endTime}` : ''}
+                  </Text>
                 )}
               </TouchableOpacity>
             );
           })}
-        </View>
-        <View style={{height:60}} />
-      </ScrollView>
+          </View>
+        </ScrollView>
+      </View>
+
+      {/* ＋ボタン（月/週と同じ右下配置） */}
+      <TouchableOpacity style={styles.addFab} onPress={() => openAdd()} activeOpacity={0.9}>
+        <Ionicons name="add" size={24} color="#FFFFFF" />
+      </TouchableOpacity>
 
       {/* ── 予定追加・編集モーダル ── */}
       <Modal transparent visible={modalVisible} animationType="fade" onRequestClose={() => setModalVisible(false)}>
@@ -253,21 +443,60 @@ export function DailyView({ currentDate, onDayChange, onStampPress }: Props) {
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>{editId ? '予定を編集' : '予定を追加'}</Text>
+                <Text style={styles.modalTitle}>{(editId || editNoteItemId) ? t('daily.editEvent') : t('daily.addEvent')}</Text>
 
                 <TextInput
                   style={styles.modalInput}
                   value={title}
                   onChangeText={setTitle}
-                  placeholder="タイトル（例: 会議・ランチ）"
+                  placeholder={t('daily.titlePlaceholder')}
                   placeholderTextColor={colors.textLight}
                   autoFocus
                 />
 
-                <TimePicker label="開始時間" value={startTime} onChange={setStartTime} />
-                <TimePicker label="終了時間" value={endTime}   onChange={setEndTime} />
+                <TextInput
+                  style={styles.modalInput}
+                  value={url}
+                  onChangeText={setUrl}
+                  placeholder={t('daily.urlPlaceholder')}
+                  placeholderTextColor={colors.textLight}
+                  keyboardType="url"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
 
-                {/* カラー */}
+                <TimePicker label={t('daily.startTime')} value={startTime} onChange={setStartTime} />
+                <TimePicker label={t('daily.endTime')} value={endTime}   onChange={setEndTime} />
+
+                {/* マンスリーに反映（NoteItem編集時は非表示） */}
+                {!editNoteItemId && (
+                  <View style={styles.notifRow}>
+                    <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                    <Text style={styles.notifLabel}>{t('daily.reflectMonthly')}</Text>
+                    <Switch
+                      value={reflectToMonthly}
+                      onValueChange={(v) => { setReflectToMonthly(v); if (!v) setNotifEnabled(false); }}
+                      trackColor={{ false: '#BFDBFE', true: colors.primaryLight }}
+                      thumbColor={reflectToMonthly ? colors.primary : '#FFFFFF'}
+                      style={{ marginLeft: 'auto' }}
+                    />
+                  </View>
+                )}
+
+                {/* 通知（タイムスケジュールでも常に利用可能） */}
+                <View style={styles.notifRow}>
+                  <Ionicons name="notifications-outline" size={16} color={colors.primary} />
+                  <Text style={styles.notifLabel}>{t('daily.notify5min')}</Text>
+                  <Switch
+                    value={notifEnabled}
+                    onValueChange={setNotifEnabled}
+                    trackColor={{ false: '#BFDBFE', true: colors.primaryLight }}
+                    thumbColor={notifEnabled ? colors.primary : '#FFFFFF'}
+                    style={{ marginLeft: 'auto' }}
+                  />
+                </View>
+
+                {/* カラー（常に表示） */}
                 <View style={styles.colorRow}>
                   {SLOT_COLORS.map((c) => (
                     <TouchableOpacity
@@ -279,16 +508,16 @@ export function DailyView({ currentDate, onDayChange, onStampPress }: Props) {
                 </View>
 
                 <View style={styles.modalBtns}>
-                  {editId && (
+                  {(editId || editNoteItemId) && (
                     <TouchableOpacity style={styles.delBtn} onPress={handleDelete}>
-                      <Text style={styles.delBtnText}>削除</Text>
+                      <Text style={styles.delBtnText}>{t('common.delete')}</Text>
                     </TouchableOpacity>
                   )}
                   <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
-                    <Text style={styles.cancelBtnText}>キャンセル</Text>
+                    <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-                    <Text style={styles.saveBtnText}>保存</Text>
+                    <Text style={styles.saveBtnText}>{t('daily.save')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -304,41 +533,57 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
   // ヘッダー
-  header: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, gap: 8 },
+  // スタンプボタンを削除した分、縦幅をコンパクトに
+  header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 4 },
   dateRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   navBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.6)', alignItems: 'center', justifyContent: 'center' },
   dateLabel: { fontSize: 15, fontWeight: '800', color: colors.text, flex: 1, textAlign: 'center' },
-  headerBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  stampRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, flexWrap: 'wrap' },
-  mainBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 9 },
-  mainBadgeText: { fontSize: 13, fontWeight: '900' },
-  miniBadges: { flexDirection: 'row', gap: 5 },
-  miniBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
-  miniBadgeText: { fontSize: 11, fontWeight: '700' },
-  badgeEmpty: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, backgroundColor: 'rgba(255,255,255,0.45)', borderWidth: 1, borderColor: colors.primaryLight, borderStyle: 'dashed' },
-  badgeEmptyText: { fontSize: 10, color: colors.primary, fontWeight: '600' },
-  specialLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  specialLabel: { fontSize: 11, fontWeight: '600' },
-  addFab: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: colors.primary, shadowOffset: {width:0,height:3}, shadowOpacity:0.35, shadowRadius:6, elevation:4 },
+
+  addFab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
 
   // タイムライン
+  timelineViewport: { flex: 1 },
   scroll: { flex: 1 },
   gridContainer: { position: 'relative' },
 
   hourRow: {
-    height: HOUR_H,
     flexDirection: 'row',
     alignItems: 'flex-start',
     borderTopWidth: 0.5,
-    borderTopColor: '#E5DCF0',
+    borderTopColor: '#D4C8E8',
   },
   hourRowEnd: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     borderTopWidth: 0.5,
-    borderTopColor: '#E5DCF0',
+    borderTopColor: '#D4C8E8',
   },
-  hourLabel: { width: LABEL_W, fontSize: 11, color: colors.textLight, fontWeight: '500', paddingLeft: 12, paddingTop: 4 },
+  hourLabel: {
+    width: LABEL_W,
+    fontSize: 13,
+    lineHeight: 16,
+    color: colors.textSecondary,
+    fontWeight: '700',
+    fontFamily: HOUR_LABEL_FONT,
+    ...(Platform.OS === 'ios' ? { fontVariant: ['tabular-nums' as const] } : {}),
+    paddingLeft: 6,
+    marginTop: -1,
+  },
   hourLine: { flex: 1, borderLeftWidth: 0.5, borderLeftColor: '#E5DCF0', height: '100%' },
 
   // イベント（絶対）
@@ -352,11 +597,13 @@ const styles = StyleSheet.create({
     zIndex: 10,
     shadowColor: '#000', shadowOffset:{width:0,height:1}, shadowOpacity:0.15, shadowRadius:3, elevation:2,
   },
-  eventTitle: { fontSize: 12, fontWeight: '700', color: '#FFFFFF' },
-  eventTime:  { fontSize: 10, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
+  eventTitle: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
+  eventTime:  { fontSize: 12, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
 
   // モーダル
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(45,27,105,0.4)', justifyContent: 'center', paddingHorizontal: 20 },
+  notifRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F8F4FC', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  notifLabel: { fontSize: 14, fontWeight: '600', color: colors.text },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'center', paddingHorizontal: 20 },
   modalCard: { backgroundColor: '#FDFAFF', borderRadius: 24, padding: 20, gap: 14, shadowColor: '#000', shadowOffset:{width:0,height:8}, shadowOpacity:0.15, shadowRadius:20, elevation:10 },
   modalTitle: { fontSize: 16, fontWeight: '800', color: colors.text, textAlign: 'center' },
   modalInput: { backgroundColor: '#F5EFF5', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: colors.text },
@@ -370,4 +617,35 @@ const styles = StyleSheet.create({
   cancelBtnText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
   saveBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center' },
   saveBtnText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF' },
+
+  // 月カレ予定ブロック（絶対配置・塗りつぶし）
+  noteEventBlock: {
+    position: 'absolute',
+    left: LABEL_W + 4,
+    right: 6,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    zIndex: 9,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 3, elevation: 2,
+  },
+  noteEventTitle: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
+  noteEventTime: { fontSize: 12, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
+
+  // 本日の目標
+  goalSection: {
+    marginHorizontal: 12,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  goalInput: {
+    backgroundColor: '#FFFDE7',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 18,
+    color: colors.text,
+    minHeight: 44,
+    lineHeight: 24,
+  },
 });

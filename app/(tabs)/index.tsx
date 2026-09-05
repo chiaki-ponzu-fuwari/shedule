@@ -5,10 +5,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import { MonthlyView } from '../../components/calendar/MonthlyView';
 import { WeeklyView } from '../../components/calendar/WeeklyView';
 import { DailyView } from '../../components/calendar/DailyView';
+import { SelectedDayPanel } from '../../components/calendar/SelectedDayPanel';
 import { ViewToggle } from '../../components/ui/ViewToggle';
 import { WheelPicker } from '../../components/ui/WheelPicker';
 import { DayDetailSheet } from '../../components/modals/DayDetailSheet';
@@ -17,8 +18,9 @@ import { AddStampModal } from '../../components/modals/AddStampModal';
 import { RecurringModal } from '../../components/modals/RecurringModal';
 import { BirthdayModal } from '../../components/modals/BirthdayModal';
 import { colors } from '../../constants/colors';
-import { CalendarView } from '../../types';
+import { CalendarView, Stamp } from '../../types';
 import { formatDate } from '../../utils/dateUtils';
+import { useTranslation } from '../../constants/i18n';
 
 const TODAY = new Date();
 const TODAY_STR = formatDate(TODAY);
@@ -27,6 +29,7 @@ const PICKER_YEARS = Array.from({ length: 21 }, (_, i) => 2020 + i);
 const PICKER_MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 export default function CalendarScreen() {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [view, setView] = useState<CalendarView>('monthly');
   const [currentMonth, setCurrentMonth] = useState(new Date(TODAY.getFullYear(), TODAY.getMonth(), 1));
@@ -37,6 +40,7 @@ export default function CalendarScreen() {
   const [dayViewVisible, setDayViewVisible] = useState(false);
   const [detailVisible, setDetailVisible] = useState(false);
   const [addStampVisible, setAddStampVisible] = useState(false);
+  const [editingStamp, setEditingStamp] = useState<Stamp | undefined>(undefined);
   const [recurringVisible, setRecurringVisible] = useState(false);
   const [birthdayVisible, setBirthdayVisible] = useState(false);
 
@@ -57,11 +61,11 @@ export default function CalendarScreen() {
     setMonthPickerVisible(false);
   }, [pYear, pMonth]);
 
-  // 日付タップ → ウィークリーはそのまま選択のみ、それ以外はサマリー表示
+  // 日付タップ → 月間は下パネル表示のみ、ウィークリーは選択のみ、それ以外はサマリー表示
   const handleDayPress = useCallback((dateStr: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedDate(dateStr);
-    if (view !== 'weekly') setDayViewVisible(true);
+    if (view !== 'weekly' && view !== 'monthly') setDayViewVisible(true);
   }, [view]);
 
   // サマリーの＋ or FAB → 入力フォーム
@@ -71,6 +75,13 @@ export default function CalendarScreen() {
   }, []);
 
   const handleOpenAddStamp = useCallback(() => {
+    setEditingStamp(undefined);
+    setDetailVisible(false);
+    setTimeout(() => setAddStampVisible(true), 300);
+  }, []);
+
+  const handleOpenEditStamp = useCallback((stamp: Stamp) => {
+    setEditingStamp(stamp);
     setDetailVisible(false);
     setTimeout(() => setAddStampVisible(true), 300);
   }, []);
@@ -106,7 +117,7 @@ export default function CalendarScreen() {
             style={styles.actionBtn}
             onPress={goToday}
           >
-            <Text style={styles.todayLabel}>今日</Text>
+            <Text style={styles.todayLabel}>{t('cal.today')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -114,13 +125,18 @@ export default function CalendarScreen() {
       {/* Calendar views */}
       <View style={styles.calendarArea}>
         {view === 'monthly' && (
-          <MonthlyView
-            currentMonth={currentMonth}
-            selectedDate={selectedDate}
-            onDayPress={handleDayPress}
-            onMonthChange={setCurrentMonth}
-            onPickerOpen={openMonthPicker}
-          />
+          <View style={{ flex: 1 }}>
+            <View style={{ flex: 1 }}>
+              <MonthlyView
+                currentMonth={currentMonth}
+                selectedDate={selectedDate}
+                onDayPress={handleDayPress}
+                onMonthChange={setCurrentMonth}
+                onPickerOpen={openMonthPicker}
+              />
+            </View>
+            <SelectedDayPanel date={selectedDate} />
+          </View>
         )}
         {view === 'weekly' && (
           <WeeklyView
@@ -139,8 +155,8 @@ export default function CalendarScreen() {
         )}
       </View>
 
-      {/* FAB – 直接入力フォームを開く */}
-      {view !== 'daily' && (
+      {/* FAB – 月ビューのみ（週・日は各画面内の操作で追加） */}
+      {view === 'monthly' && (
         <TouchableOpacity
           style={styles.fab}
           onPress={() => {
@@ -149,7 +165,7 @@ export default function CalendarScreen() {
             setDetailVisible(true);
           }}
         >
-          <Text style={styles.fabIcon}>＋</Text>
+          <Ionicons name="add" size={24} color="#FFFFFF" />
         </TouchableOpacity>
       )}
 
@@ -166,11 +182,13 @@ export default function CalendarScreen() {
         date={selectedDate}
         onClose={() => setDetailVisible(false)}
         onOpenAddStamp={handleOpenAddStamp}
+        onOpenEditStamp={handleOpenEditStamp}
         onDateChange={setSelectedDate}
       />
       <AddStampModal
         visible={addStampVisible}
-        onClose={() => setAddStampVisible(false)}
+        onClose={() => { setAddStampVisible(false); setEditingStamp(undefined); }}
+        editStamp={editingStamp}
       />
       <RecurringModal
         visible={recurringVisible}
@@ -192,20 +210,20 @@ export default function CalendarScreen() {
           <View style={styles.pickerOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.pickerCard}>
-                <Text style={styles.pickerTitle}>年月を選択</Text>
+                <Text style={styles.pickerTitle}>{t('picker.yearMonth')}</Text>
                 <View style={styles.pickerRow}>
                   <WheelPicker
                     items={PICKER_YEARS}
                     selectedIndex={PICKER_YEARS.indexOf(pYear) >= 0 ? PICKER_YEARS.indexOf(pYear) : 0}
                     onChange={(i) => setPYear(PICKER_YEARS[i])}
-                    formatItem={(v) => `${v}年`}
+                    formatItem={(v) => t('picker.yearFmt', { v })}
                     width={110}
                   />
                   <WheelPicker
                     items={PICKER_MONTHS}
                     selectedIndex={pMonth - 1}
                     onChange={(i) => setPMonth(PICKER_MONTHS[i])}
-                    formatItem={(v) => `${v}月`}
+                    formatItem={(v) => t('picker.monthFmt', { v })}
                     width={88}
                   />
                 </View>
@@ -214,13 +232,13 @@ export default function CalendarScreen() {
                     style={styles.pickerCancelBtn}
                     onPress={() => setMonthPickerVisible(false)}
                   >
-                    <Text style={styles.pickerCancelText}>キャンセル</Text>
+                    <Text style={styles.pickerCancelText}>{t('common.cancel')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.pickerConfirmBtn}
                     onPress={confirmMonthPicker}
                   >
-                    <Text style={styles.pickerConfirmText}>決定</Text>
+                    <Text style={styles.pickerConfirmText}>{t('picker.confirm')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -246,7 +264,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    shadowColor: '#A78BFA',
+    shadowColor: '#3B82F6',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 6,
@@ -293,7 +311,7 @@ const styles = StyleSheet.create({
   // 年月ピッカー
   pickerOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(45,27,105,0.4)',
+    backgroundColor: 'rgba(15,23,42,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
   },

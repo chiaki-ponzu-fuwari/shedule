@@ -1,43 +1,53 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, Modal, TouchableOpacity, TouchableWithoutFeedback,
-  StyleSheet, Animated, Dimensions, TextInput, Switch,
+  StyleSheet, Animated, Dimensions, TextInput,
   Image, ScrollView, Platform, Alert, Keyboard,
 } from 'react-native';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { compressPickedImageUri } from '../../utils/compressPickedImage';
 import { useCalendarStore } from '../../store/calendarStore';
 import { useStampStore } from '../../store/stampStore';
 import { WheelPicker } from '../ui/WheelPicker';
 import { colors } from '../../constants/colors';
-import { Stamp } from '../../types';
+import { NoteItem, Stamp } from '../../types';
 import { formatFullDate, addDays, formatDate, parseDate } from '../../utils/dateUtils';
+import { requestNotificationPermission, scheduleNotification, cancelNotification } from '../../utils/notifications';
+import { useTranslation } from '../../constants/i18n';
 
 const PICKER_YEARS = Array.from({ length: 21 }, (_, i) => 2020 + i);
 const PICKER_MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const MONTH_DAYS = [31,29,31,30,31,30,31,31,30,31,30,31];
 
 const { height: SCREEN_H } = Dimensions.get('window');
-const SHEET_H = SCREEN_H * 0.88;
+// 月表示でも背景（カレンダー）が見えるようにコンパクト化
+const SHEET_H = SCREEN_H * 0.56;
 
 type StampPos = 'main' | 'mini-left' | 'mini-right';
-
-const STAMP_TABS: { key: StampPos; label: string }[] = [
-  { key: 'main', label: 'メイン帯' },
-  { key: 'mini-left', label: 'ミニ左' },
-  { key: 'mini-right', label: 'ミニ右' },
-];
 
 interface Props {
   visible: boolean;
   date: string;
   onClose: () => void;
   onOpenAddStamp: () => void;
+  onOpenEditStamp?: (stamp: Stamp) => void;
   onDateChange?: (newDate: string) => void;
 }
 
-export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateChange }: Props) {
+export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onOpenEditStamp, onDateChange }: Props) {
+  const { t, locale } = useTranslation();
+  const stampTabs = React.useMemo(
+    () =>
+      [
+        { key: 'main' as const, label: t('recurring.mainBand') },
+        { key: 'mini-left' as const, label: t('recurring.miniLeft') },
+        { key: 'mini-right' as const, label: t('recurring.miniRight') },
+      ] as const,
+    [t]
+  );
   const goDay = (n: number) => {
     Haptics.selectionAsync();
     onDateChange?.(formatDate(addDays(parseDate(date), n)));
@@ -69,15 +79,14 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
 
   const pickerDays = Array.from({ length: MONTH_DAYS[pMonth - 1] }, (_, i) => i + 1);
   const slideAnim = useRef(new Animated.Value(SHEET_H)).current;
+  const [shouldRender, setShouldRender] = useState(false);
 
   const entry = useCalendarStore((s) => s.getEntry(date));
   const setMainStamp = useCalendarStore((s) => s.setMainStamp);
   const setMiniStamp = useCalendarStore((s) => s.setMiniStamp);
   const setNotes = useCalendarStore((s) => s.setNotes);
   const setNoteItems = useCalendarStore((s) => s.setNoteItems);
-  const setStartTime = useCalendarStore((s) => s.setStartTime);
-  const setEndTime = useCalendarStore((s) => s.setEndTime);
-  const setNotification = useCalendarStore((s) => s.setNotification);
+  const updateTimeSlot = useCalendarStore((s) => s.updateTimeSlot);
   const setImageUri = useCalendarStore((s) => s.setImageUri);
 
   const stamps = useStampStore((s) => s.stamps);
@@ -89,9 +98,13 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
   const miniStamps = stamps.filter((s) => (s.isMain === false || s.isMain === undefined) && s.isEnabled !== false && !s.isImageStamp);
   const displayStamps = activePos === 'main' ? mainStamps : miniStamps;
 
-  const [noteItems, setNoteItemsLocal] = useState<string[]>([]);
-  const [startVal, setStartVal] = useState('');
-  const [endVal, setEndVal] = useState('');
+  const [noteItems, setNoteItemsLocal] = useState<NoteItem[]>([]);
+
+  const formatTimeInput = (input: string): string => {
+    const digits = input.replace(/\D/g, '').slice(0, 4);
+    if (digits.length <= 2) return digits;
+    return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+  };
   const [keyboardPad, setKeyboardPad] = useState(0);
 
   useEffect(() => {
@@ -104,17 +117,21 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
 
   useEffect(() => {
     if (visible) {
+      setShouldRender(true);
       setActivePos('main');
-      // noteItems がある場合はそれを使い、古い notes があれば移行
-      if (entry?.noteItems !== undefined) {
-        setNoteItemsLocal(entry.noteItems);
+      // noteItems がある場合はそれを使い、旧string[]・古いnotesも移行
+      if (entry?.noteItems !== undefined && entry.noteItems.length > 0) {
+        const items = entry.noteItems.map((item: any, i: number) =>
+          typeof item === 'string'
+            ? { id: `migrated_${i}`, text: item }
+            : item
+        ) as NoteItem[];
+        setNoteItemsLocal(items);
       } else if (entry?.notes) {
-        setNoteItemsLocal([entry.notes]);
+        setNoteItemsLocal([{ id: `migrated_0`, text: entry.notes }]);
       } else {
         setNoteItemsLocal([]);
       }
-      setStartVal(entry?.startTime ?? '');
-      setEndVal(entry?.endTime ?? '');
       Animated.spring(slideAnim, {
         toValue: 0,
         useNativeDriver: true,
@@ -126,7 +143,7 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
         toValue: SHEET_H,
         duration: 220,
         useNativeDriver: true,
-      }).start();
+      }).start(() => setShouldRender(false));
     }
   }, [visible, date]);
 
@@ -157,7 +174,8 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
       quality: 0.7,
     });
     if (!result.canceled && result.assets[0]?.uri) {
-      const stamp = addImageStamp(result.assets[0].uri);
+      const uri = await compressPickedImageUri(result.assets[0].uri);
+      const stamp = addImageStamp(uri);
       setImageUri(date, stamp.imageUri);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -172,10 +190,10 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
 
   // 画像スタンプを削除（この日の割り当ても解除）
   const handleDeleteImageStamp = (stamp: Stamp) => {
-    Alert.alert('画像スタンプを削除', 'このスタンプを削除しますか？', [
-      { text: 'キャンセル', style: 'cancel' },
+    Alert.alert(t('dayDetail.delImageStampTitle'), t('dayDetail.delImageStampMsg'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: '削除', style: 'destructive', onPress: () => {
+        text: t('common.delete'), style: 'destructive', onPress: () => {
           if (entry?.imageUri === stamp.imageUri) setImageUri(date, undefined);
           removeStamp(stamp.id);
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -186,19 +204,51 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
 
   const selectedStampId = getSelectedStampId();
 
+  const handleSave = async () => {
+    const allValid = noteItems.filter((n) => n.text.trim() !== '');
+    const needsNotif = allValid.some(i => i.notificationEnabled && i.time && i.time.length === 5);
+    const granted = needsNotif ? await requestNotificationPermission() : false;
+
+    const updated = await Promise.all(allValid.map(async (item) => {
+      if (item.notificationEnabled && item.time && item.time.length === 5 && granted) {
+        if (item.notificationId) await cancelNotification(item.notificationId);
+        const result = await scheduleNotification(
+          date,
+          item.time,
+          item.text || t('dayDetail.defaultNoteTitle'),
+          t('daily.notifSummary', { time: item.time })
+        );
+        return { ...item, notificationId: result.id ?? undefined };
+      } else if (!item.notificationEnabled && item.notificationId) {
+        await cancelNotification(item.notificationId);
+        return { ...item, notificationId: undefined };
+      }
+      return item;
+    }));
+
+    setNoteItems(date, updated);
+
+    for (const item of updated.filter(n => n.fromTimeSlotId)) {
+      updateTimeSlot(date, item.fromTimeSlotId!, {
+        title: item.text,
+        startTime: item.time ?? '',
+        endTime: item.endTime ?? '',
+        notificationEnabled: item.notificationEnabled ?? false,
+        notificationId: item.notificationId,
+      });
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  if (!shouldRender) return null;
+
   return (
-    <Modal
-      transparent
-      animationType="none"
-      visible={visible}
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay}>
-          <TouchableWithoutFeedback onPress={() => {}}>
-            <Animated.View style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}>
-              <View style={{ flex: 1 }}>
+    <>
+      <Animated.View
+        style={[styles.sheet, { transform: [{ translateY: slideAnim }], pointerEvents: 'auto' }]}
+      >
+        <View style={{ flex: 1 }}>
                 {/* Handle */}
                 <View style={styles.handle} />
 
@@ -208,7 +258,7 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                     <Text style={styles.arrowText}>‹</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={openDatePicker} style={{ flex: 1 }}>
-                    <Text style={styles.dateText}>{formatFullDate(date)}</Text>
+                    <Text style={styles.dateText}>{formatFullDate(date, locale)}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.arrowBtn} onPress={() => goDay(1)}>
                     <Text style={styles.arrowText}>›</Text>
@@ -221,14 +271,15 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                 <ScrollView
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="always"
-                  contentContainerStyle={{ paddingBottom: keyboardPad + 20 }}
+                  // 下の余白を最小化（背景が見える割合を増やす）
+                  contentContainerStyle={{ paddingBottom: keyboardPad + 6 }}
                 >
 
                   {/* ─ スタンプ ─ */}
                   <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>スタンプ</Text>
+                    <Text style={styles.sectionLabel}>{t('dayDetail.stamp')}</Text>
                     <View style={styles.tabs}>
-                      {STAMP_TABS.map((tab) => (
+                      {stampTabs.map((tab) => (
                         <TouchableOpacity
                           key={tab.key}
                           style={[styles.tab, activePos === tab.key && styles.tabActive]}
@@ -246,6 +297,10 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                           key={stamp.id}
                           style={styles.stampItem}
                           onPress={() => handleStampPress(stamp)}
+                          onLongPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                            onOpenEditStamp?.(stamp);
+                          }}
                           activeOpacity={0.75}
                         >
                           <View style={[
@@ -266,7 +321,7 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
 
                   {/* ─ 画像スタンプ ─ */}
                   <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>画像スタンプ</Text>
+                    <Text style={styles.sectionLabel}>{t('dayDetail.imageStamp')}</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageStampRow}>
                       {/* 保存済み画像スタンプ */}
                       {imageStamps.map((stamp) => {
@@ -305,146 +360,203 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                       {/* 新規追加ボタン */}
                       <TouchableOpacity style={styles.imageAddBtn} onPress={handleAddImageStamp}>
                         <Ionicons name="camera-outline" size={22} color={colors.primary} />
-                        <Text style={styles.imageAddLabel}>追加</Text>
+                        <Text style={styles.imageAddLabel}>{t('settings.add')}</Text>
                       </TouchableOpacity>
                     </ScrollView>
-                  </View>
-
-                  {/* ─ 時間 ─ */}
-                  <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>時間</Text>
-                    <View style={styles.timeRow}>
-                      <View style={styles.timeField}>
-                        <Text style={styles.timeLabel}>開始</Text>
-                        <TextInput
-                          style={styles.timeInput}
-                          value={startVal}
-                          onChangeText={setStartVal}
-                          onBlur={() => setStartTime(date, startVal)}
-                          placeholder="09:00"
-                          placeholderTextColor={colors.textLight}
-                          keyboardType="numbers-and-punctuation"
-                          maxLength={5}
-                        />
-                      </View>
-                      <Text style={styles.timeSep}>〜</Text>
-                      <View style={styles.timeField}>
-                        <Text style={styles.timeLabel}>終了</Text>
-                        <TextInput
-                          style={styles.timeInput}
-                          value={endVal}
-                          onChangeText={setEndVal}
-                          onBlur={() => setEndTime(date, endVal)}
-                          placeholder="18:00"
-                          placeholderTextColor={colors.textLight}
-                          keyboardType="numbers-and-punctuation"
-                          maxLength={5}
-                        />
-                      </View>
-                    </View>
                   </View>
 
                   {/* ─ メモ・予定（複数） ─ */}
                   <View style={styles.section}>
                     <View style={styles.noteHeader}>
-                      <Text style={styles.sectionLabel}>メモ・予定</Text>
+                      <Text style={styles.sectionLabel}>{t('dayDetail.notes')}</Text>
                       <TouchableOpacity
                         style={styles.noteAddBtn}
                         onPress={() => {
                           Haptics.selectionAsync();
-                          setNoteItemsLocal((prev) => [...prev, '']);
+                          setNoteItemsLocal((prev) => [
+                            ...prev,
+                            { id: `item_${Date.now()}`, text: '', time: '', notificationEnabled: false },
+                          ]);
                         }}
                       >
-                        <Text style={styles.noteAddBtnText}>＋ 追加</Text>
+                        <Text style={styles.noteAddBtnText}>{t('dayDetail.addLine')}</Text>
                       </TouchableOpacity>
                     </View>
-                    {noteItems.map((item, idx) => (
-                      <View key={idx} style={styles.noteItemRow}>
-                        <TextInput
-                          style={styles.noteItemInput}
-                          value={item}
-                          onChangeText={(text) => {
-                            const next = [...noteItems];
-                            next[idx] = text;
-                            setNoteItemsLocal(next);
-                          }}
-                          placeholder="予定を入力…"
-                          placeholderTextColor={colors.textLight}
-                          multiline
-                        />
-                        <TouchableOpacity
-                          style={styles.noteDeleteBtn}
-                          onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            setNoteItemsLocal((prev) => prev.filter((_, i) => i !== idx));
-                          }}
-                        >
-                          <Ionicons name="close-circle" size={20} color="#EF4444" />
-                        </TouchableOpacity>
-                      </View>
-                    ))}
+
+                    <DraggableFlatList
+                      data={noteItems}
+                      keyExtractor={(item) => item.id}
+                      onDragEnd={({ data }) => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setNoteItemsLocal(data);
+                      }}
+                      scrollEnabled={false}
+                      renderItem={({ item, drag, isActive }: RenderItemParams<NoteItem>) => {
+                        const idx = noteItems.findIndex((n) => n.id === item.id);
+                        return (
+                          <ScaleDecorator>
+                            <View style={[styles.noteItemCard, isActive && styles.noteItemCardActive]}>
+                              {/* 1行目：ドラッグハンドル ＋ 通知ベル ＋ 時間 ＋ 削除 */}
+                              <View style={styles.noteItemTopRow}>
+                                <TouchableOpacity
+                                  onLongPress={drag}
+                                  delayLongPress={150}
+                                  style={styles.dragHandle}
+                                >
+                                  <Ionicons name="reorder-three-outline" size={20} color={colors.textLight} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    Haptics.selectionAsync();
+                                    const next = [...noteItems];
+                                    next[idx] = { ...item, notificationEnabled: !item.notificationEnabled };
+                                    setNoteItemsLocal(next);
+                                  }}
+                                >
+                                  <Ionicons
+                                    name={item.notificationEnabled ? 'notifications' : 'notifications-outline'}
+                                    size={18}
+                                    color={item.notificationEnabled ? colors.primary : colors.textLight}
+                                  />
+                                </TouchableOpacity>
+                                <TextInput
+                                  style={styles.noteTimeInput}
+                                  value={item.time ?? ''}
+                                  onChangeText={(t) => {
+                                    const next = [...noteItems];
+                                    next[idx] = { ...item, time: formatTimeInput(t) };
+                                    setNoteItemsLocal(next);
+                                  }}
+                                  placeholder="--:--"
+                                  placeholderTextColor={colors.textLight}
+                                  keyboardType="number-pad"
+                                  maxLength={5}
+                                />
+                                <Text style={styles.timeSep}>{locale === 'en' ? '–' : '〜'}</Text>
+                                <TextInput
+                                  style={styles.noteTimeInput}
+                                  value={item.endTime ?? ''}
+                                  onChangeText={(t) => {
+                                    const next = [...noteItems];
+                                    next[idx] = { ...item, endTime: formatTimeInput(t) };
+                                    setNoteItemsLocal(next);
+                                  }}
+                                  placeholder="--:--"
+                                  placeholderTextColor={colors.textLight}
+                                  keyboardType="number-pad"
+                                  maxLength={5}
+                                />
+                                <TouchableOpacity
+                                  style={{ marginLeft: 'auto' }}
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    setNoteItemsLocal((prev) => prev.filter((n) => n.id !== item.id));
+                                  }}
+                                >
+                                  <Ionicons name="close-circle" size={18} color="#EF4444" />
+                                </TouchableOpacity>
+                              </View>
+                              {/* 2行目：内容 */}
+                              <TextInput
+                                style={styles.noteItemInput}
+                                value={item.text}
+                                onChangeText={(text) => {
+                                  const next = [...noteItems];
+                                  next[idx] = { ...item, text };
+                                  setNoteItemsLocal(next);
+                                }}
+                                placeholder={t('dayDetail.notePlaceholder')}
+                                placeholderTextColor={colors.textLight}
+                                multiline
+                              />
+                              {/* 3行目：URL */}
+                              <View style={styles.urlRow}>
+                                <Ionicons name="link-outline" size={14} color={colors.textLight} />
+                                <TextInput
+                                  style={styles.urlInput}
+                                  value={item.url ?? ''}
+                                  onChangeText={(url) => {
+                                    const next = [...noteItems];
+                                    next[idx] = { ...item, url: url || undefined };
+                                    setNoteItemsLocal(next);
+                                  }}
+                                  placeholder={t('dayDetail.urlPlaceholder')}
+                                  placeholderTextColor={colors.textLight}
+                                  keyboardType="url"
+                                  autoCapitalize="none"
+                                  autoCorrect={false}
+                                />
+                              </View>
+                            </View>
+                          </ScaleDecorator>
+                        );
+                      }}
+                    />
+
                     {noteItems.length === 0 && (
                       <TouchableOpacity
                         style={styles.noteEmptyBtn}
-                        onPress={() => { Haptics.selectionAsync(); setNoteItemsLocal(['']); }}
+                        onPress={() => {
+                          Haptics.selectionAsync();
+                          setNoteItemsLocal([{ id: `item_${Date.now()}`, text: '', time: '', notificationEnabled: false }]);
+                        }}
                       >
                         <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                        <Text style={styles.noteEmptyBtnText}>メモ・予定を追加</Text>
+                        <Text style={styles.noteEmptyBtnText}>{t('dayDetail.addNotes')}</Text>
                       </TouchableOpacity>
                     )}
 
-                    {/* 確定ボタン（ScrollView内に置きキーボード対応） */}
-                    <TouchableOpacity
-                      style={[styles.saveBtn, { marginTop: 10 }]}
-                      onPress={() => {
-                        const filtered = noteItems.filter((s) => s.trim() !== '');
-                        setNoteItems(date, filtered);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        onClose();
-                      }}
-                    >
-                      <Text style={styles.saveBtnText}>確定</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* ─ 通知 ─ */}
-                  <View style={styles.section}>
-                    <View style={styles.notifRow}>
-                      <View style={styles.notifLeft}>
-                        <Text style={styles.sectionLabel}>通知</Text>
-                      </View>
-                      <Switch
-                        value={entry?.notificationEnabled ?? false}
-                        onValueChange={(val) => {
-                          Haptics.selectionAsync();
-                          setNotification(date, val);
+                    {/* 確定ボタン（2つ） */}
+                    <View style={styles.saveBtnRow}>
+                      <TouchableOpacity
+                        style={[styles.saveBtn, styles.saveBtnClose]}
+                        onPress={async () => {
+                          await handleSave();
+                          onClose();
                         }}
-                        trackColor={{ false: '#E0D0F0', true: colors.primaryLight }}
-                        thumbColor={entry?.notificationEnabled ? colors.primary : '#FFFFFF'}
-                      />
+                      >
+                        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                        <Text style={styles.saveBtnText}>{t('dayDetail.saveClose')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.saveBtn, styles.saveBtnNext]}
+                        onPress={async () => {
+                          await handleSave();
+                          // 翌日に移動してリセット
+                          const next = formatDate(addDays(parseDate(date), 1));
+                          onDateChange?.(next);
+                          setNoteItemsLocal([]);
+                        }}
+                      >
+                        <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+                        <Text style={styles.saveBtnText}>{t('dayDetail.saveNext')}</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
 
                 </ScrollView>
-              </View>
-            </Animated.View>
-          </TouchableWithoutFeedback>
         </View>
-      </TouchableWithoutFeedback>
+      </Animated.View>
 
-      {/* ── 年月日ピッカー（同一Modal内オーバーレイ）── */}
-      {datePickerVisible && (
+      {/* ── 年月日ピッカー ── */}
+      <Modal
+        transparent
+        animationType="fade"
+        visible={datePickerVisible}
+        onRequestClose={() => setDatePickerVisible(false)}
+        statusBarTranslucent
+      >
         <TouchableWithoutFeedback onPress={() => setDatePickerVisible(false)}>
           <View style={styles.dpOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.dpCard}>
-                <Text style={styles.dpTitle}>日付を選択</Text>
+                <Text style={styles.dpTitle}>{t('picker.date')}</Text>
                 <View style={styles.dpRow}>
                   <WheelPicker
                     items={PICKER_YEARS}
                     selectedIndex={PICKER_YEARS.indexOf(pYear) >= 0 ? PICKER_YEARS.indexOf(pYear) : 0}
                     onChange={(i) => setPYear(PICKER_YEARS[i])}
-                    formatItem={(v) => `${v}年`}
+                    formatItem={(v) => t('picker.yearFmt', { v })}
                     width={100}
                   />
                   <WheelPicker
@@ -455,70 +567,74 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onDateC
                       setPMonth(m);
                       setPDay((prev) => Math.min(prev, MONTH_DAYS[m - 1]));
                     }}
-                    formatItem={(v) => `${v}月`}
+                    formatItem={(v) => t('picker.monthFmt', { v })}
                     width={72}
                   />
                   <WheelPicker
                     items={pickerDays}
                     selectedIndex={Math.min(pDay, pickerDays.length) - 1}
                     onChange={(i) => setPDay(pickerDays[i])}
-                    formatItem={(v) => `${v}日`}
+                    formatItem={(v) => t('picker.dayFmt', { v })}
                     width={72}
                   />
                 </View>
                 <View style={styles.dpBtns}>
                   <TouchableOpacity style={styles.dpCancelBtn} onPress={() => setDatePickerVisible(false)}>
-                    <Text style={styles.dpCancelText}>キャンセル</Text>
+                    <Text style={styles.dpCancelText}>{t('common.cancel')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.dpConfirmBtn} onPress={confirmDatePicker}>
-                    <Text style={styles.dpConfirmText}>決定</Text>
+                    <Text style={styles.dpConfirmText}>{t('picker.confirm')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
-      )}
-    </Modal>
+      </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(45,27,105,0.4)',
-    justifyContent: 'flex-end',
-  },
   sheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     height: SHEET_H,
-    backgroundColor: '#FDFAFF',
+    backgroundColor: 'rgba(248,250,255,0.94)',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 16,
-    paddingBottom: 20,
+    paddingBottom: 8,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    elevation: 20,
   },
   handle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0D0F0',
-    alignSelf: 'center', marginTop: 10, marginBottom: 6,
+    width: 40, height: 4, borderRadius: 2, backgroundColor: '#BFDBFE',
+    alignSelf: 'center', marginTop: 8, marginBottom: 4,
   },
   header: {
     flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingVertical: 8,
+    justifyContent: 'space-between', paddingVertical: 6,
     borderBottomWidth: 1, borderBottomColor: '#F0E8F8', marginBottom: 4,
   },
   dateText: { fontSize: 14, fontWeight: '800', color: colors.text, flex: 1, textAlign: 'center' },
   arrowBtn: {
-    width: 30, height: 30, borderRadius: 15,
+    width: 28, height: 28, borderRadius: 14,
     backgroundColor: '#F5EFF5', alignItems: 'center', justifyContent: 'center',
   },
   arrowText: { fontSize: 22, color: colors.primary, lineHeight: 26 },
   closeBtn: {
-    width: 30, height: 30, borderRadius: 15,
+    width: 28, height: 28, borderRadius: 14,
     backgroundColor: '#F0E6F0', alignItems: 'center', justifyContent: 'center',
   },
   closeBtnText: { fontSize: 12, color: colors.textSecondary, fontWeight: '700' },
 
-  section: { marginTop: 14 },
+  section: { marginTop: 10 },
   sectionLabel: { fontSize: 12, fontWeight: '800', color: colors.textSecondary, marginBottom: 8 },
 
   tabs: {
@@ -528,7 +644,7 @@ const styles = StyleSheet.create({
   tab: { flex: 1, paddingVertical: 7, borderRadius: 10, alignItems: 'center' },
   tabActive: {
     backgroundColor: '#FFFFFF',
-    shadowColor: '#A78BFA', shadowOffset: { width: 0, height: 1 },
+    shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.15, shadowRadius: 4, elevation: 2,
   },
   tabText: { fontSize: 13, fontWeight: '600', color: colors.textLight },
@@ -537,7 +653,7 @@ const styles = StyleSheet.create({
   stampGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   stampItem: { width: '20%', alignItems: 'center', paddingVertical: 6 },
   stampCircle: {
-    width: 50, height: 50, borderRadius: 14,
+    width: 46, height: 46, borderRadius: 14,
     alignItems: 'center', justifyContent: 'center',
   },
   stampCircleSelected: {
@@ -551,7 +667,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary, marginTop: 3,
   },
   addStampBtn: {
-    width: 50, height: 50, borderRadius: 14,
+    width: 46, height: 46, borderRadius: 14,
     borderWidth: 2, borderColor: colors.primaryLight, borderStyle: 'dashed',
     alignItems: 'center', justifyContent: 'center', margin: 6,
   },
@@ -561,7 +677,7 @@ const styles = StyleSheet.create({
   imageStampRow: { flexDirection: 'row' },
   imageStampWrap: { marginRight: 10, position: 'relative' },
   imageStampImg: {
-    width: 56, height: 56, borderRadius: 14,
+    width: 52, height: 52, borderRadius: 14,
     borderWidth: 2, borderColor: 'transparent',
     alignItems: 'center', justifyContent: 'center',
     overflow: 'hidden',
@@ -573,7 +689,7 @@ const styles = StyleSheet.create({
     position: 'absolute', top: -6, right: -6,
   },
   imageAddBtn: {
-    width: 56, height: 56, borderRadius: 14,
+    width: 52, height: 52, borderRadius: 14,
     borderWidth: 2, borderColor: colors.primaryLight, borderStyle: 'dashed',
     alignItems: 'center', justifyContent: 'center', gap: 2,
   },
@@ -591,15 +707,42 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8,
   },
   noteAddBtn: {
-    backgroundColor: '#FFE4F0', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: '#DBEAFE', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
   },
   noteAddBtnText: { fontSize: 12, fontWeight: '700', color: colors.primary },
+  noteItemCard: {
+    backgroundColor: '#FFFFFF', borderRadius: 12, padding: 12, marginBottom: 8,
+    shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 1,
+    gap: 8,
+  },
+  noteItemCardActive: {
+    shadowOpacity: 0.22, shadowRadius: 10, elevation: 8,
+    backgroundColor: '#FAF6FF',
+  },
+  dragHandle: {
+    paddingRight: 4,
+  },
+  noteItemTopRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  noteTimeInput: {
+    backgroundColor: '#F5EFF5', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+    fontSize: 14, fontWeight: '600', color: colors.text, width: 64, textAlign: 'center',
+  },
   noteItemRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 8,
   },
   noteItemInput: {
-    flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 12,
-    fontSize: 14, color: colors.text, minHeight: 44, textAlignVertical: 'top',
+    backgroundColor: '#EFF6FF', borderRadius: 10, padding: 10,
+    fontSize: 14, color: colors.text, minHeight: 40, textAlignVertical: 'top',
+  },
+  urlRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#F0F7FF', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 6,
+  },
+  urlInput: {
+    flex: 1, fontSize: 12, color: colors.primary,
   },
   noteDeleteBtn: { paddingTop: 12 },
   noteEmptyBtn: {
@@ -609,13 +752,29 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   noteEmptyBtnText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  saveBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
   saveBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: 10, paddingVertical: 12, alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: 10,
+    paddingVertical: 10,
     shadowColor: colors.primary, shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25, shadowRadius: 6, elevation: 3,
   },
-  saveBtnText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF' },
+  saveBtnNext: {
+    backgroundColor: '#3B82F6',
+  },
+  saveBtnClose: {
+    backgroundColor: colors.primary,
+  },
+  saveBtnText: { fontSize: 13, fontWeight: '800', color: '#FFFFFF' },
 
   // 通知
   notifRow: {
@@ -626,7 +785,7 @@ const styles = StyleSheet.create({
   notifBell: { fontSize: 16 },
 
   // 年月日ピッカー
-  dpOverlay: { flex: 1, backgroundColor: 'rgba(45,27,105,0.4)', justifyContent: 'center', alignItems: 'center' },
+  dpOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'center', alignItems: 'center' },
   dpCard: { backgroundColor: '#FDFAFF', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, minWidth: 300 },
   dpTitle: { fontSize: 16, fontWeight: '800', color: colors.text, marginBottom: 16 },
   dpRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 },

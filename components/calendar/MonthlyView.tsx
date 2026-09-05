@@ -1,16 +1,18 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  PanResponder,
+  PanResponder, useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import { DayCell } from './DayCell';
+import { Haptics } from '../../utils/haptics';
+import { DayCell, DAY_CELL_MARGIN_H } from './DayCell';
 import { useCalendarStore } from '../../store/calendarStore';
 import { useStampStore } from '../../store/stampStore';
 import { getMonthDays, getMonthLabel, addMonths, getWeekdayLabels } from '../../utils/dateUtils';
 import { colors } from '../../constants/colors';
+import { useTranslation } from '../../constants/i18n';
+import { DayEntry } from '../../types';
 
 interface Props {
   currentMonth: Date;
@@ -21,15 +23,28 @@ interface Props {
 }
 
 export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthChange, onPickerOpen }: Props) {
+  const { width: windowWidth } = useWindowDimensions();
+  const [gridWidth, setGridWidth] = useState<number | null>(null);
+  const widthForCells = gridWidth ?? windowWidth;
+  const cellWidth = Math.max(1, Math.floor((widthForCells - DAY_CELL_MARGIN_H * 2 * 7) / 7));
+
+  const { locale } = useTranslation();
   const entries = useCalendarStore((s) => s.entries);
   const specialDates = useCalendarStore((s) => s.specialDates);
+  const recurringSchedules = useCalendarStore((s) => s.recurringSchedules);
   const weekStartDay = useCalendarStore((s) => s.weekStartDay);
   const getStamp = useStampStore((s) => s.getStamp);
+
+  const getDisplayStampId = (entry: DayEntry | undefined, position: 'main' | 'mini-left' | 'mini-right') => {
+    if (position === 'main') return entry?.mainStampId;
+    if (position === 'mini-left') return entry?.miniStamps?.left;
+    return entry?.miniStamps?.right;
+  };
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const days = getMonthDays(year, month, specialDates, weekStartDay);
-  const weekdays = getWeekdayLabels(weekStartDay);
+  const weekdays = getWeekdayLabels(weekStartDay, locale);
 
   // 左右スワイプで月移動
   const swipeStartX = useRef(0);
@@ -57,7 +72,7 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
     <View style={styles.container} {...panResponder.panHandlers}>
       {/* ── 月ヘッダー ── */}
       <LinearGradient
-        colors={['#FFE4F0', '#EDE9FE']}
+        colors={['#DBEAFE', '#EFF6FF']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.header}
@@ -71,7 +86,7 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => { Haptics.selectionAsync(); onPickerOpen?.(); }}>
-          <Text style={styles.monthLabel}>{getMonthLabel(year, month)}</Text>
+          <Text style={styles.monthLabel}>{getMonthLabel(year, month, locale)}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -103,23 +118,34 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
       {/* ── 日付グリッド ── */}
       <ScrollView
         style={{ flex: 1 }}
+        contentContainerStyle={scrollContentStyle}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.grid}>
+        <View
+          style={styles.grid}
+          onLayout={(e) => {
+            const w = e.nativeEvent.layout.width;
+            if (w > 0) setGridWidth(w);
+          }}
+        >
           {days.map((day) => {
             const entry = entries[day.dateString];
+            const mainId = getDisplayStampId(entry, 'main');
+            const leftId = getDisplayStampId(entry, 'mini-left');
+            const rightId = getDisplayStampId(entry, 'mini-right');
             return (
               <DayCell
                 key={day.dateString}
                 day={day}
                 entry={entry}
-                mainStamp={entry?.mainStampId ? getStamp(entry.mainStampId) : undefined}
-                leftMiniStamp={entry?.miniStamps?.left ? getStamp(entry.miniStamps.left) : undefined}
-                rightMiniStamp={entry?.miniStamps?.right ? getStamp(entry.miniStamps.right) : undefined}
+                mainStamp={mainId ? getStamp(mainId) : undefined}
+                leftMiniStamp={leftId ? getStamp(leftId) : undefined}
+                rightMiniStamp={rightId ? getStamp(rightId) : undefined}
                 onPress={() => onDayPress(day.dateString)}
                 isSelected={selectedDate === day.dateString}
                 imageUri={entry?.imageUri}
                 hasNotes={!!(entry?.notes || (entry?.noteItems && entry.noteItems.length > 0))}
+                cellWidth={cellWidth}
               />
             );
           })}
@@ -128,6 +154,8 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
     </View>
   );
 }
+
+const scrollContentStyle = { width: '100%' as const, flexGrow: 1 as const };
 
 const styles = StyleSheet.create({
   container: {
@@ -177,6 +205,7 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    width: '100%',
     backgroundColor: '#F0EBF8',
     paddingVertical: 1,
   },

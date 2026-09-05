@@ -4,12 +4,13 @@ import {
   StyleSheet, Animated, Dimensions, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import { useCalendarStore } from '../../store/calendarStore';
 import { useStampStore } from '../../store/stampStore';
 import { WheelPicker } from '../ui/WheelPicker';
 import { colors } from '../../constants/colors';
 import { formatFullDate, addDays, formatDate, parseDate } from '../../utils/dateUtils';
+import { useTranslation } from '../../constants/i18n';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_H = SCREEN_H * 0.52;
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: Props) {
+  const { t, locale } = useTranslation();
   const goDay = (n: number) => {
     Haptics.selectionAsync();
     onDateChange(formatDate(addDays(parseDate(date), n)));
@@ -114,7 +116,7 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
                   <Text style={styles.arrowText}>‹</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={openDatePicker} style={{ flex: 1 }}>
-                  <Text style={styles.dateText}>{formatFullDate(date)}</Text>
+                  <Text style={styles.dateText}>{formatFullDate(date, locale)}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.arrowBtn} onPress={() => goDay(1)}>
                   <Text style={styles.arrowText}>›</Text>
@@ -152,7 +154,7 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
                     <View style={styles.infoRow}>
                       <Text style={styles.infoIcon}>🕐</Text>
                       <Text style={styles.infoText}>
-                        {entry.startTime || '--:--'} 〜 {entry.endTime || '--:--'}
+                        {entry.startTime || '--:--'} {locale === 'en' ? '–' : '〜'} {entry.endTime || '--:--'}
                       </Text>
                     </View>
                   )}
@@ -174,9 +176,17 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
                   {hasNoteItems && (
                     <View style={styles.notesBox}>
                       {entry!.noteItems!.map((item, idx) => (
-                        <View key={idx} style={[styles.noteItemRow, idx > 0 && { borderTopWidth: 1, borderTopColor: '#EDE9FE', marginTop: 6, paddingTop: 6 }]}>
+                        <View key={idx} style={[styles.noteItemRow, idx > 0 && { borderTopWidth: 1, borderTopColor: '#EFF6FF', marginTop: 6, paddingTop: 6 }]}>
                           <Ionicons name="ellipse" size={6} color={colors.primary} style={{ marginTop: 7 }} />
-                          <Text style={styles.notesText}>{item}</Text>
+                          <Text style={styles.notesText}>
+                            {item.time
+                              ? `${item.time}${item.endTime ? `${locale === 'en' ? '–' : '〜'}${item.endTime}` : ''} `
+                              : ''}
+                            {item.text}
+                          </Text>
+                          {item.fromGoogleId ? (
+                            <View style={styles.gBadge}><Text style={styles.gBadgeText}>G</Text></View>
+                          ) : null}
                         </View>
                       ))}
                     </View>
@@ -191,13 +201,13 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
                   {/* 通知 */}
                   {entry?.notificationEnabled && (
                     <View style={styles.infoRow}>
-                      <Text style={styles.infoText}>通知ON</Text>
+                      <Text style={styles.infoText}>{t('dayView.notifyOn')}</Text>
                     </View>
                   )}
                 </View>
               ) : (
                 <View style={styles.emptyBox}>
-                  <Text style={styles.emptyText}>この日の予定はまだありません</Text>
+                  <Text style={styles.emptyText}>{t('dayView.empty')}</Text>
                 </View>
               )}
 
@@ -215,7 +225,7 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
 
               {/* ＋ 編集ボタン */}
               <TouchableOpacity style={styles.editBtn} onPress={handleEdit}>
-                <Text style={styles.editBtnText}>＋ 予定を入力する</Text>
+                <Text style={styles.editBtnText}>{t('dayView.addEntry')}</Text>
               </TouchableOpacity>
             </Animated.View>
           </TouchableWithoutFeedback>
@@ -228,13 +238,13 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
           <View style={styles.dpOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.dpCard}>
-                <Text style={styles.dpTitle}>日付を選択</Text>
+                <Text style={styles.dpTitle}>{t('picker.date')}</Text>
                 <View style={styles.dpRow}>
                   <WheelPicker
                     items={PICKER_YEARS}
                     selectedIndex={PICKER_YEARS.indexOf(pYear) >= 0 ? PICKER_YEARS.indexOf(pYear) : 0}
                     onChange={(i) => setPYear(PICKER_YEARS[i])}
-                    formatItem={(v) => `${v}年`}
+                    formatItem={(v) => t('picker.yearFmt', { v })}
                     width={100}
                   />
                   <WheelPicker
@@ -245,23 +255,23 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
                       setPMonth(m);
                       setPDay((prev) => Math.min(prev, MONTH_DAYS[m - 1]));
                     }}
-                    formatItem={(v) => `${v}月`}
+                    formatItem={(v) => t('picker.monthFmt', { v })}
                     width={72}
                   />
                   <WheelPicker
                     items={pickerDays}
                     selectedIndex={Math.min(pDay, pickerDays.length) - 1}
                     onChange={(i) => setPDay(pickerDays[i])}
-                    formatItem={(v) => `${v}日`}
+                    formatItem={(v) => t('picker.dayFmt', { v })}
                     width={72}
                   />
                 </View>
                 <View style={styles.dpBtns}>
                   <TouchableOpacity style={styles.dpCancelBtn} onPress={() => setDatePickerVisible(false)}>
-                    <Text style={styles.dpCancelText}>キャンセル</Text>
+                    <Text style={styles.dpCancelText}>{t('common.cancel')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.dpConfirmBtn} onPress={confirmDatePicker}>
-                    <Text style={styles.dpConfirmText}>決定</Text>
+                    <Text style={styles.dpConfirmText}>{t('picker.confirm')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -276,7 +286,7 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(45,27,105,0.35)',
+    backgroundColor: 'rgba(15,23,42,0.35)',
     justifyContent: 'flex-end',
   },
   sheet: {
@@ -288,7 +298,7 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   handle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0D0F0',
+    width: 40, height: 4, borderRadius: 2, backgroundColor: '#BFDBFE',
     alignSelf: 'center', marginTop: 10, marginBottom: 8,
   },
   header: {
@@ -335,7 +345,7 @@ const styles = StyleSheet.create({
   imageThumb: { width: 48, height: 48, borderRadius: 12 },
   imageThumbIcon: {
     width: 48, height: 48, borderRadius: 12,
-    backgroundColor: '#EDE9FE', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center',
   },
 
   notesBox: {
@@ -343,6 +353,8 @@ const styles = StyleSheet.create({
   },
   noteItemRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   notesText: { flex: 1, fontSize: 14, color: colors.text, lineHeight: 20 },
+  gBadge: { backgroundColor: '#4285F4', borderRadius: 4, width: 16, height: 16, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
+  gBadgeText: { fontSize: 9, fontWeight: '900', color: '#FFFFFF' },
 
   emptyBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { fontSize: 14, color: colors.textLight },
@@ -357,7 +369,7 @@ const styles = StyleSheet.create({
   editBtnText: { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
 
   // 年月日ピッカー
-  dpOverlay: { flex: 1, backgroundColor: 'rgba(45,27,105,0.4)', justifyContent: 'center', alignItems: 'center' },
+  dpOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'center', alignItems: 'center' },
   dpCard: { backgroundColor: '#FDFAFF', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, minWidth: 300 },
   dpTitle: { fontSize: 16, fontWeight: '800', color: colors.text, marginBottom: 16 },
   dpRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 },

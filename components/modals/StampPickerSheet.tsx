@@ -1,25 +1,20 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, Modal, TouchableOpacity, TouchableWithoutFeedback,
   StyleSheet, Animated, Dimensions, FlatList,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../utils/haptics';
 import { useCalendarStore } from '../../store/calendarStore';
 import { useStampStore } from '../../store/stampStore';
 import { colors } from '../../constants/colors';
 import { Stamp } from '../../types';
 import { formatMonthDay } from '../../utils/dateUtils';
+import { useTranslation } from '../../constants/i18n';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_H = SCREEN_H * 0.55;
 
 type Position = 'main' | 'mini-left' | 'mini-right';
-
-const POSITION_TABS: { key: Position; label: string }[] = [
-  { key: 'main', label: 'メイン帯' },
-  { key: 'mini-left', label: 'ミニ左' },
-  { key: 'mini-right', label: 'ミニ右' },
-];
 
 interface Props {
   visible: boolean;
@@ -29,6 +24,16 @@ interface Props {
 }
 
 export function StampPickerSheet({ visible, date, onClose, onOpenAddStamp }: Props) {
+  const { t, locale } = useTranslation();
+  const positionTabs = useMemo(
+    () =>
+      [
+        { key: 'main' as const, label: t('recurring.mainBand') },
+        { key: 'mini-left' as const, label: t('recurring.miniLeft') },
+        { key: 'mini-right' as const, label: t('recurring.miniRight') },
+      ],
+    [t]
+  );
   const [activePos, setActivePos] = useState<Position>('main');
   const slideAnim = useRef(new Animated.Value(SHEET_H)).current;
 
@@ -104,7 +109,7 @@ export function StampPickerSheet({ visible, date, onClose, onOpenAddStamp }: Pro
 
               {/* Header */}
               <View style={styles.sheetHeader}>
-                <Text style={styles.dateText}>{formatMonthDay(date)}</Text>
+                <Text style={styles.dateText}>{formatMonthDay(date, locale)}</Text>
                 <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                   <Text style={styles.closeBtnText}>✕</Text>
                 </TouchableOpacity>
@@ -112,7 +117,7 @@ export function StampPickerSheet({ visible, date, onClose, onOpenAddStamp }: Pro
 
               {/* Position tabs */}
               <View style={styles.tabs}>
-                {POSITION_TABS.map((tab) => (
+                {positionTabs.map((tab) => (
                   <TouchableOpacity
                     key={tab.key}
                     style={[styles.tab, activePos === tab.key && styles.tabActive]}
@@ -130,11 +135,11 @@ export function StampPickerSheet({ visible, date, onClose, onOpenAddStamp }: Pro
 
               {/* Current selection */}
               <View style={styles.currentRow}>
-                <Text style={styles.currentLabel}>選択中：</Text>
+                <Text style={styles.currentLabel}>{t('stampPicker.selected')}</Text>
                 {selectedId ? (
                   <CurrentStampPreview stampId={selectedId} />
                 ) : (
-                  <Text style={styles.noneText}>なし（タップで設定）</Text>
+                  <Text style={styles.noneText}>{t('stampPicker.none')}</Text>
                 )}
               </View>
 
@@ -163,7 +168,7 @@ export function StampPickerSheet({ visible, date, onClose, onOpenAddStamp }: Pro
                 )}
                 ListFooterComponent={
                   <TouchableOpacity style={styles.addBtn} onPress={onOpenAddStamp}>
-                    <Text style={styles.addBtnText}>＋ 新しいスタンプを作る</Text>
+                    <Text style={styles.addBtnText}>{t('stampPicker.create')}</Text>
                   </TouchableOpacity>
                 }
                 contentContainerStyle={styles.stampGrid}
@@ -190,7 +195,7 @@ function CurrentStampPreview({ stampId }: { stampId: string }) {
 
 const styles = StyleSheet.create({
   overlay: {
-    flex: 1, backgroundColor: 'rgba(45,27,105,0.4)',
+    flex: 1, backgroundColor: 'rgba(15,23,42,0.4)',
     justifyContent: 'flex-end',
   },
   sheet: {
@@ -199,7 +204,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingBottom: 20,
   },
   handle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0D0F0',
+    width: 40, height: 4, borderRadius: 2, backgroundColor: '#BFDBFE',
     alignSelf: 'center', marginTop: 10, marginBottom: 6,
   },
   sheetHeader: {
@@ -220,7 +225,7 @@ const styles = StyleSheet.create({
     flex: 1, paddingVertical: 8, borderRadius: 10,
     alignItems: 'center',
   },
-  tabActive: { backgroundColor: '#FFFFFF', shadowColor: '#A78BFA', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 2 },
+  tabActive: { backgroundColor: '#FFFFFF', shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 2 },
   tabText: { fontSize: 13, fontWeight: '600', color: colors.textLight },
   tabTextActive: { color: colors.primary, fontWeight: '700' },
   currentRow: {
