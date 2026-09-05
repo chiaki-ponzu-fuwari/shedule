@@ -80,10 +80,23 @@ describe('public bilingual legal and support pages', () => {
   test('deletion page names the in-app route and distinguishes Google source events', () => {
     const html = page('delete-account');
     expect(html).toContain('設定');
-    expect(html).toContain('アカウントとバックアップ');
+    expect(html).toContain('データ保存用アカウント');
+    expect(html).toContain('Backup account');
+    expect(html).toContain('スクロール');
+    expect(html).toContain('Scroll');
     expect(html).toContain('アカウントとデータを削除');
     expect(html).toContain('Googleカレンダー上の元の予定は削除されません');
     expect(html).toContain('取り消せません');
+  });
+
+  test('privacy, support, and deletion instructions match the current Settings label', () => {
+    for (const name of ['privacy', 'support', 'delete-account'] as const) {
+      const html = page(name);
+      expect(html).toContain('データ保存用アカウント');
+      expect(html).toContain('Backup account');
+      expect(html).not.toContain('アカウントとバックアップ');
+      expect(html).not.toContain('Account &amp; backup');
+    }
   });
 
   test('community rules include reporting, blocking, enforcement, and appeals', () => {

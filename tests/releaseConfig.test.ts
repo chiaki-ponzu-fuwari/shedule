@@ -244,8 +244,16 @@ describe('app-owned privacy manifest', () => {
     expect(manifest.NSPrivacyTrackingDomains).toEqual([]);
     expect(collectedTypes).toEqual(
       [
+        'NSPrivacyCollectedDataTypeCoarseLocation',
+        'NSPrivacyCollectedDataTypeContacts',
+        'NSPrivacyCollectedDataTypeCustomerSupport',
+        'NSPrivacyCollectedDataTypeDeviceID',
         'NSPrivacyCollectedDataTypeEmailAddress',
         'NSPrivacyCollectedDataTypeName',
+        'NSPrivacyCollectedDataTypeOtherDataTypes',
+        'NSPrivacyCollectedDataTypeOtherDiagnosticData',
+        'NSPrivacyCollectedDataTypePerformanceData',
+        'NSPrivacyCollectedDataTypePreciseLocation',
         'NSPrivacyCollectedDataTypeOtherUserContent',
         'NSPrivacyCollectedDataTypePhotosorVideos',
         'NSPrivacyCollectedDataTypeUserID',

@@ -131,7 +131,7 @@ NODE_ENV=production npm run verify:config
 ## 6. App Store Connect
 
 - Privacy Policy URLとSupport URLを設定する。
-- App Privacyは実装と一致させる。少なくとも `User ID`、`Name`、`Email Address`、`Other User Content`、`Photos or Videos` を「Linked to User / App Functionality / Not used for tracking」として確認する。
+- App Privacyは実装と一致させる。`User ID`、`Name`、`Email Address`、`Contacts`（グループのsocial graph）、`Customer Support`、`Coarse Location`、`Precise Location`、`Device ID`、`Other Diagnostic Data`、`Performance Data`、`Other Data Types`（暗号化Apple失効資格）、`Other User Content`、`Photos or Videos` を「Linked to User / App Functionality / Not used for tracking」として確認する。Supabaseログの実項目と保持期間を確認するまでは安全側に申告し、根拠なく減らさない。
 - アプリ内にゲスト利用、同等に見つけやすいGoogle/Appleログイン、プライバシー/規約/問い合わせ、アカウント削除を表示する。
 - 審査用に2ユーザー分のテスト手順、グループ参加コード、通報・ブロック、クラウド復元、削除の確認手順をReview Notesへ記載する。バックエンドは審査中も稼働させる。
 - 取得権限は利用場面で要求する。通知は予定通知を初めて有効にした時、写真は写真を選んだ時だけ要求する。
