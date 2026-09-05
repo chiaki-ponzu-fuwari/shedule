@@ -648,6 +648,12 @@ describe('account lifecycle Edge Function contracts', () => {
     expect(source).toContain('apple_credential_store_repair_required');
     expect(source).toContain('reconcile_apple_credential_store');
     expect(source).toContain('p_provider_revocation_confirmed: true');
+    expect(source).not.toMatch(
+      /rpc\('reconcile_apple_credential_store'[\s\S]*?\}\)\.catch\(/,
+    );
+    expect(source).toMatch(
+      /try\s*\{[\s\S]*?await context\.adminClient\.rpc\('reconcile_apple_credential_store'[\s\S]*?\}\s*catch\s*\{/,
+    );
     expect(source).toContain('p_credential_issued_at');
     expect(source).toContain('expectedNonceHash');
     expect(source).toContain('revokeAppleRefreshToken(tokens.refreshToken)');

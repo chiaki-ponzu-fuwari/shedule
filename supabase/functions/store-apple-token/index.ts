@@ -104,12 +104,16 @@ serveAccountFunction(async (context) => {
       }
     }
     if (safeToReleaseClaim) {
-      await context.adminClient.rpc('reconcile_apple_credential_store', {
-        p_user_id: context.user.id,
-        p_provider_subject_hash: providerSubjectHash,
-        p_claim_id: claimId,
-        p_provider_revocation_confirmed: true,
-      }).catch(() => undefined);
+      try {
+        await context.adminClient.rpc('reconcile_apple_credential_store', {
+          p_user_id: context.user.id,
+          p_provider_subject_hash: providerSubjectHash,
+          p_claim_id: claimId,
+          p_provider_revocation_confirmed: true,
+        });
+      } catch {
+        // Reconciliation is best effort after Apple has confirmed revocation.
+      }
     }
     throw error;
   }
