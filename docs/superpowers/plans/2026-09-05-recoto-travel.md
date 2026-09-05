@@ -22,6 +22,7 @@
 
 - Create `types/travel.ts`, `constants/travel.ts`: domain contracts and safe presets.
 - Create `utils/tripUtils.ts`, `utils/safeUrl.ts`: validation, sorting, week segmentation, lane packing.
+- Create `utils/tripNotifications.ts`: contextual itinerary reminders and restore-time rescheduling.
 - Create `store/tripStore.ts`: owner-scoped local CRUD and outbox enqueueing.
 - Create `lib/account/tripMapper.ts`: cloud row conversion without device-only fields.
 - Create `app/(tabs)/travel.tsx`: trip list screen.
@@ -324,3 +325,23 @@ npm run verify
 ```
 
 Capture a browser screenshot with dense schedule bands, birthday/anniversary markers, and overlapping trips; compare it with the approved v7 prototype. Commit as `feat: show subtle travel routes on calendar`.
+
+### Task 6: Add optional itinerary reminders
+
+- [ ] **Step 1: Write failing reminder tests**
+
+Create `tests/travel/tripNotifications.test.ts` with an injected notification gateway. Assert no permission request while creating an item with reminders off; enabling a reminder requests permission once in context; a denied permission leaves the item saved with reminders off; restored items receive new device notification IDs; and those IDs are never added to the cloud mapper.
+
+- [ ] **Step 2: Verify RED**
+
+Run `npm test -- tests/travel/tripNotifications.test.ts`.
+Expected: FAIL because the reminder coordinator is absent.
+
+- [ ] **Step 3: Implement reminder coordination**
+
+Expose `enableTripItemReminder(itemId, minutesBefore)`, `disableTripItemReminder(itemId)`, and `rescheduleTripRemindersAfterRestore()`. Ask for OS permission only from the enable action, schedule against `startsAtUtc`, cancel old device IDs on edits/deletes, and keep failures local/retryable without blocking itinerary save.
+
+- [ ] **Step 4: Verify GREEN and commit**
+
+Run `npm test -- tests/travel/tripNotifications.test.ts tests/travel/tripCloudMapper.test.ts && npm run typecheck`.
+Commit as `feat: add optional itinerary reminders`.
