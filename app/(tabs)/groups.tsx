@@ -40,7 +40,7 @@ function isInvalidEmoji(s?: string) {
 }
 
 function makeInviteUrl(code: string): string {
-  return `scheduleshare://join/${code}`;
+  return `recoto://join/${code}`;
 }
 
 export default function GroupsScreen() {
@@ -225,7 +225,7 @@ export default function GroupsScreen() {
   };
 
   const shareInvite = async (group: Group) => {
-    const url = `scheduleshare://join/${group.inviteCode}`;
+    const url = `recoto://join/${group.inviteCode}`;
     const message = t('groups.inviteMsg', { name: group.name, url, code: group.inviteCode });
     try {
       await Share.share({ message, url });

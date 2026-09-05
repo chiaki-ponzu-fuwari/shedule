@@ -1,11 +1,17 @@
 {
   "expo": {
-    "name": "スケジュール",
-    "slug": "schedule-share-app",
+    "name": "レコト",
+    "slug": "recoto",
     "version": "1.0.0",
+    "icon": "./assets/images/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "scheme": "scheduleshare",
+    "scheme": "recoto",
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F4F7FC"
+    },
     "platforms": [
       "ios",
       "android",
@@ -13,10 +19,10 @@
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.scheduleshare.app"
+      "bundleIdentifier": "com.herac.recoto"
     },
     "android": {
-      "package": "com.scheduleshare.app",
+      "package": "com.herac.recoto",
       "adaptiveIcon": {
         "backgroundColor": "#FFF0F5"
       }
@@ -29,8 +35,16 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
-          "color": "#FF6B9D"
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#2878F0"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "選択した予定・プロフィール画像をアプリ内に表示するため、写真へのアクセスを許可してください。",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       "expo-secure-store"

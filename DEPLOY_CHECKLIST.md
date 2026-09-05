@@ -27,8 +27,8 @@
        （`expo start --web` 実行時にブラウザの URL バーで **実際のポートとパス** を確認して一致させる）
      - 本番: `https://（あなたの公開ドメイン）/auth`
    - **iOS 用**（ネイティブ・Expo 開発ビルド）では、Google の「iOS」タイプのクライアントは **バンドル ID** ベース。リダイレクト URI リストは Web クライアント側が主。
-   - Expo の **scheme** は `app.json` の `scheme`（このプロジェクトは `scheduleshare`）。開発時に Expo が出す **カスタムスキーム URI** を使う場合は、Google の「ウェブ」クライアントに
-     `https://auth.expo.io/@YOUR_EXPO_ACCOUNT/schedule-share-app` のような URI が必要になることがある（Expo Go / proxy 利用時）。**今のコードは Web で `useProxy: false`** なので、まずは **localhost の `/auth`** と **本番 URL** を優先。
+   - Expo の **scheme** は `app.json` の `scheme`（このプロジェクトは `recoto`）。開発時に Expo が出す **カスタムスキーム URI** を使う場合は、Google の「ウェブ」クライアントに
+     `https://auth.expo.io/@YOUR_EXPO_ACCOUNT/recoto` のような URI が必要になることがある（Expo Go / proxy 利用時）。**今のコードは Web で `/auth` を使用**しているため、まずは **localhost の `/auth`** と **本番 URL** を優先。
 3. **クライアントシークレット**は「公開クライアント」ではアプリに埋め込まない。`.env` にも **入れない**（`EXPO_PUBLIC_` には載せない）。
 4. 保存後、アプリを再起動して Google ログインを試す。
 
