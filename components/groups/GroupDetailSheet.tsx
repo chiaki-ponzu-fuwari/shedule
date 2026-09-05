@@ -121,6 +121,10 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
 
   const [tab, setTab] = useState<Tab>('info');
   const [memoEdit, setMemoEdit] = useState(group.sharedMemo ?? '');
+  const memoEditRef = useRef(group.sharedMemo ?? '');
+  const memoSaveInFlight = useRef(false);
+  const memoSaveQueued = useRef(false);
+  const memoSaveValue = useRef<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [scheduleError, setScheduleError] = useState('');
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -150,7 +154,9 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
 
   useEffect(() => {
     if (!visible) return;
-    setMemoEdit(group.sharedMemo ?? '');
+    const memo = group.sharedMemo ?? '';
+    memoEditRef.current = memo;
+    setMemoEdit(memo);
     setNameDraft(group.name);
     setNameEditing(false);
   }, [visible]);
@@ -187,13 +193,53 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
     }
   };
 
-  const handleSharedMemoSave = async () => {
-    try {
-      await updateSharedMemo(group.id, memoEdit);
-    } catch (error) {
-      // The session store exposes this as a nonblocking cloud error; keep memo typing uninterrupted.
-      devError('updateSharedMemo UI', error instanceof Error ? error.message : String(error));
+  const handleSharedMemoChange = (text: string) => {
+    memoEditRef.current = text;
+    setMemoEdit(text);
+    if (memoSaveInFlight.current && text !== memoSaveValue.current) {
+      memoSaveQueued.current = true;
     }
+  };
+
+  const handleSharedMemoSave = async () => {
+    if (memoSaveInFlight.current) {
+      if (memoEditRef.current !== memoSaveValue.current) memoSaveQueued.current = true;
+      return;
+    }
+
+    memoSaveInFlight.current = true;
+    let latestError: unknown = null;
+    try {
+      do {
+        memoSaveQueued.current = false;
+        const memo = memoEditRef.current;
+        memoSaveValue.current = memo;
+        try {
+          await updateSharedMemo(group.id, memo);
+        } catch (error) {
+          devError('updateSharedMemo UI', error instanceof Error ? error.message : String(error));
+          if (memoSaveQueued.current || memoEditRef.current !== memo) continue;
+          latestError = error;
+          break;
+        }
+      } while (memoSaveQueued.current || memoEditRef.current !== memoSaveValue.current);
+    } finally {
+      memoSaveInFlight.current = false;
+      memoSaveValue.current = null;
+    }
+
+    if (!latestError) return;
+    if (Platform.OS === 'web') {
+      const retry = window.confirm(
+        `${t('groups.errTitle')}\n\n${t('groupDetail.memoUpdateErr')}\n\n${t('common.retry')}?`
+      );
+      if (retry) void handleSharedMemoSave();
+      return;
+    }
+    Alert.alert(t('groups.errTitle'), t('groupDetail.memoUpdateErr'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.retry'), onPress: () => void handleSharedMemoSave() },
+    ]);
   };
 
   const handleSync = async () => {
@@ -475,7 +521,7 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
                     <TextInput
                       style={styles.memoInput}
                       value={memoEdit}
-                      onChangeText={setMemoEdit}
+                      onChangeText={handleSharedMemoChange}
                       onBlur={() => void handleSharedMemoSave()}
                       placeholder={t('groupDetail.memoPh')}
                       placeholderTextColor={colors.textLight}

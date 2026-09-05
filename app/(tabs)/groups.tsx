@@ -27,6 +27,7 @@ import { Group } from '../../types';
 import { GroupDetailSheet } from '../../components/groups/GroupDetailSheet';
 import { useTranslation } from '../../constants/i18n';
 import { devError } from '../../utils/devLog';
+import { isGroupIdentityConnected } from '../../lib/auth/sessionBootstrap';
 
 const MEMBER_COLORS = ['#3B82F6', '#34D399', '#F59E0B', '#EF4444', '#A78BFA', '#FB923C', '#EC4899', '#14B8A6'];
 
@@ -57,7 +58,7 @@ export default function GroupsScreen() {
   const setMyName = useGroupStore((s) => s.setMyName);
   const identityMode = useAppSessionStore((s) => s.identityMode);
   const ensureGuestSession = useAppSessionStore((s) => s.ensureGuestSession);
-  const visibleGroups = identityMode === 'hydrating' ? [] : groups;
+  const visibleGroups = isGroupIdentityConnected(identityMode) ? groups : [];
 
   const [createVisible, setCreateVisible] = useState(false);
   const [joinVisible, setJoinVisible] = useState(false);

@@ -6,13 +6,15 @@ import { useAppSessionStore } from '../store/appSessionStore';
  * 復元された Supabase セッションを監視する。
  * 起動時にセッションがなくても匿名ユーザーは作らず、グループ操作時にだけ接続する。
  */
-export function useSupabaseAuth() {
+export function useSupabaseAuth({ enabled = true }: { enabled?: boolean } = {}) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const setObservedSession = useAppSessionStore((s) => s.setObservedSession);
   const setCloudOffline = useAppSessionStore((s) => s.setCloudOffline);
 
   useEffect(() => {
+    if (!enabled) return;
+
     let cancelled = false;
     const client = getSupabaseClient();
 
@@ -53,7 +55,7 @@ export function useSupabaseAuth() {
     return () => {
       cancelled = true;
     };
-  }, [setCloudOffline, setObservedSession]);
+  }, [enabled, setCloudOffline, setObservedSession]);
 
   return { ready, error };
 }

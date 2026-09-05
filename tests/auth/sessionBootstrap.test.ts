@@ -504,6 +504,81 @@ describe('Supabase auth observer', () => {
     cleanup?.();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
+
+  test('does not start auth or persist the group cache before local hydration', async () => {
+    const unsubscribe = jest.fn();
+    const client = {
+      auth: {
+        onAuthStateChange: jest.fn(
+          (callback: (
+            event: string,
+            session: { user: { id: string; is_anonymous: boolean } }
+          ) => void) => {
+            callback('INITIAL_SESSION', {
+              user: { id: 'restored-user', is_anonymous: true },
+            });
+            return { data: { subscription: { unsubscribe } } };
+          }
+        ),
+      },
+    };
+    let groupStore: typeof import('../../store/groupStore').useGroupStore;
+    let resolveHydration!: (value: null) => void;
+    const setObservedSession = jest.fn(
+      (_configured: boolean, user: { id: string } | null) => {
+        groupStore.getState().setAuthUserId(user?.id ?? null);
+      }
+    );
+
+    jest.resetModules();
+    const storage = (
+      require('@react-native-async-storage/async-storage') as {
+        default: { getItem: jest.Mock; setItem: jest.Mock };
+      }
+    ).default;
+    storage.getItem.mockImplementation(
+      () => new Promise<null>((resolve) => {
+        resolveHydration = resolve;
+      })
+    );
+    jest.doMock('react', () => ({
+      useState: (initial: unknown) => [initial, jest.fn()],
+      useEffect: (effect: () => void | (() => void)) => effect(),
+    }));
+    jest.doMock('../../lib/supabase', () => ({
+      getSupabaseClient: () => client,
+      requireSupabaseClient: () => client,
+      supabase: client,
+    }));
+    jest.doMock('../../store/appSessionStore', () => {
+      const useAppSessionStore = Object.assign(
+        (selector: (state: object) => unknown) =>
+          selector({ setObservedSession, setCloudOffline: jest.fn() }),
+        { getState: () => ({ ensureGuestSession: jest.fn() }) }
+      );
+      return { useAppSessionStore };
+    });
+
+    groupStore = (
+      require('../../store/groupStore') as typeof import('../../store/groupStore')
+    ).useGroupStore;
+    storage.setItem.mockClear();
+    expect(groupStore.persist.hasHydrated()).toBe(false);
+
+    const { useSupabaseAuth } = require('../../hooks/useSupabaseAuth') as typeof import('../../hooks/useSupabaseAuth');
+    useSupabaseAuth({ enabled: false });
+
+    expect(client.auth.onAuthStateChange).not.toHaveBeenCalled();
+    expect(storage.setItem).not.toHaveBeenCalled();
+
+    resolveHydration(null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(groupStore.persist.hasHydrated()).toBe(true);
+
+    useSupabaseAuth({ enabled: true });
+    expect(client.auth.onAuthStateChange).toHaveBeenCalledTimes(1);
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+  });
 });
 
 test('root layout waits only for persisted local stores before rendering the router', () => {
@@ -511,8 +586,11 @@ test('root layout waits only for persisted local stores before rendering the rou
   const source = fs.readFileSync('app/_layout.tsx', 'utf8');
   const hydrationHook = fs.readFileSync('hooks/useLocalStoresHydrated.ts', 'utf8');
 
-  expect(source).toContain('useSupabaseAuth();');
   expect(source).toContain('const localStoresHydrated = useLocalStoresHydrated();');
+  expect(source).toContain('useSupabaseAuth({ enabled: localStoresHydrated });');
+  expect(source.indexOf('const localStoresHydrated = useLocalStoresHydrated();')).toBeLessThan(
+    source.indexOf('useSupabaseAuth({ enabled: localStoresHydrated });')
+  );
   expect(source).toMatch(/if\s*\(\s*!localStoresHydrated\s*\)/);
   expect(source).toContain('<ActivityIndicator');
   expect(source).not.toContain('requestNotificationPermission');
@@ -537,9 +615,175 @@ test('group detail catches recoverable name and memo update failures', () => {
   expect(source).toContain('onSubmitEditing={() => void handleGroupNameSave()}');
   expect(source).toContain('onBlur={() => void handleGroupNameSave()}');
   expect(source).toMatch(/const handleSharedMemoSave = async \(\) => \{[\s\S]*?catch \(error/);
-  expect(source).toContain('onChangeText={setMemoEdit}');
+  expect(source).toContain('onChangeText={handleSharedMemoChange}');
   expect(source).toContain('onBlur={() => void handleSharedMemoSave()}');
   expect(source).not.toMatch(/onChangeText=\{[^}]*updateSharedMemo/);
+});
+
+test('group detail shows a retryable error when memo blur save fails', () => {
+  const fs = require('node:fs') as typeof import('node:fs');
+  const source = fs.readFileSync('components/groups/GroupDetailSheet.tsx', 'utf8');
+  const i18n = fs.readFileSync('constants/i18n.ts', 'utf8');
+
+  expect(source).toMatch(
+    /const handleSharedMemoSave = async \(\) => \{[\s\S]*?catch \(error[\s\S]*?Alert\.alert\([\s\S]*?groupDetail\.memoUpdateErr[\s\S]*?common\.cancel[\s\S]*?common\.retry[\s\S]*?onPress: \(\) => void handleSharedMemoSave\(\)/
+  );
+  expect(source).toContain('onChangeText={handleSharedMemoChange}');
+  expect(source).not.toMatch(/onChangeText=\{[^}]*updateSharedMemo/);
+  expect(i18n.match(/'groupDetail\.memoUpdateErr':/g)).toHaveLength(2);
+  expect(i18n.match(/'common\.retry':/g)).toHaveLength(2);
+});
+
+describe('group detail memo save behavior', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.dontMock('../../store/groupStore');
+    jest.dontMock('../../store/calendarStore');
+    jest.dontMock('../../store/stampStore');
+    jest.dontMock('../../constants/i18n');
+    jest.dontMock('@expo/vector-icons');
+    jest.dontMock('../../utils/haptics');
+    jest.resetModules();
+  });
+
+  function renderGroupDetail(updateSharedMemo: jest.Mock) {
+    const groupState = {
+      updateSharedMemo,
+      updateGroupName: jest.fn(async () => undefined),
+      setGroupIconUri: jest.fn(),
+      sharingSettings: {},
+      setSharingSettings: jest.fn(),
+      syncMySchedule: jest.fn(async () => undefined),
+      fetchGroupSchedules: jest.fn(async () => undefined),
+      sharedEntries: {},
+      myUserId: 'member-1',
+      myName: 'Member',
+    };
+
+    jest.resetModules();
+    jest.doMock('../../store/groupStore', () => ({
+      useGroupStore: (selector: (state: typeof groupState) => unknown) => selector(groupState),
+    }));
+    jest.doMock('../../store/calendarStore', () => ({
+      useCalendarStore: (selector: (state: { entries: object }) => unknown) =>
+        selector({ entries: {} }),
+    }));
+    jest.doMock('../../store/stampStore', () => ({
+      useStampStore: (selector: (state: { getStamp: jest.Mock }) => unknown) =>
+        selector({ getStamp: jest.fn() }),
+    }));
+    jest.doMock('../../constants/i18n', () => ({
+      useTranslation: () => ({ t: (key: string) => key, locale: 'en' }),
+    }));
+    jest.doMock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+    jest.doMock('../../utils/haptics', () => ({
+      Haptics: {
+        selectionAsync: jest.fn(),
+        notificationAsync: jest.fn(),
+        NotificationFeedbackType: { Success: 'success' },
+      },
+    }));
+
+    const React = require('react') as typeof import('react');
+    const reactNative = require('react-native') as typeof import('react-native');
+    Object.defineProperty(reactNative.Platform, 'OS', { configurable: true, value: 'web' });
+    const testing = require('@testing-library/react-native/pure') as typeof import('@testing-library/react-native/pure');
+    const { GroupDetailSheet } = require('../../components/groups/GroupDetailSheet') as typeof import('../../components/groups/GroupDetailSheet');
+    const rendered = testing.render(
+      React.createElement(GroupDetailSheet, {
+        group: {
+          id: 'group-1',
+          name: 'Group',
+          color: '#000000',
+          emoji: '👥',
+          inviteCode: 'CODE12',
+          members: [{ id: 'member-1', name: 'Member', color: '#000000' }],
+          sharedMemo: 'first draft',
+          createdAt: '2026-09-05T00:00:00.000Z',
+        },
+        visible: true,
+        onClose: jest.fn(),
+        onDelete: jest.fn(),
+        onShare: jest.fn(),
+      })
+    );
+    return { ...rendered, ...testing };
+  }
+
+  test('serializes blur saves and sends only the latest queued draft', async () => {
+    let resolveFirst!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const updateSharedMemo = jest
+      .fn()
+      .mockImplementationOnce(() => firstSave)
+      .mockResolvedValueOnce(undefined);
+    const { getByPlaceholderText, fireEvent, act, unmount } = renderGroupDetail(updateSharedMemo);
+    const memoInput = getByPlaceholderText('groupDetail.memoPh');
+
+    fireEvent(memoInput, 'blur');
+    fireEvent.changeText(memoInput, 'latest draft');
+    fireEvent(memoInput, 'blur');
+
+    expect(updateSharedMemo).toHaveBeenCalledTimes(1);
+    expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'first draft');
+
+    await act(async () => {
+      resolveFirst();
+      await firstSave;
+    });
+
+    expect(updateSharedMemo).toHaveBeenCalledTimes(2);
+    expect(updateSharedMemo).toHaveBeenNthCalledWith(2, 'group-1', 'latest draft');
+    unmount();
+  });
+
+  test('web retry resends the latest draft and catches another rejection', async () => {
+    let rejectFirst!: (error: Error) => void;
+    const firstSave = new Promise<void>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    const updateSharedMemo = jest
+      .fn()
+      .mockImplementationOnce(() => firstSave)
+      .mockRejectedValueOnce(new Error('still offline'))
+      .mockResolvedValueOnce(undefined);
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const confirm = jest.fn().mockReturnValueOnce(true);
+    Object.defineProperty(window, 'confirm', { configurable: true, value: confirm });
+    const { getByPlaceholderText, fireEvent, act, waitFor, unmount } = renderGroupDetail(updateSharedMemo);
+    const memoInput = getByPlaceholderText('groupDetail.memoPh');
+
+    fireEvent(memoInput, 'blur');
+    fireEvent.changeText(memoInput, 'latest draft');
+    await act(async () => {
+      rejectFirst(new Error('offline'));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(updateSharedMemo).toHaveBeenCalledTimes(3);
+    });
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'first draft');
+    expect(updateSharedMemo).toHaveBeenNthCalledWith(2, 'group-1', 'latest draft');
+    expect(updateSharedMemo).toHaveBeenNthCalledWith(3, 'group-1', 'latest draft');
+    unmount();
+  });
+});
+
+test('group visibility is limited to connected identity modes', () => {
+  const sessionBootstrap = require('../../lib/auth/sessionBootstrap') as {
+    isGroupIdentityConnected?: (mode: string) => boolean;
+  };
+
+  expect(typeof sessionBootstrap.isGroupIdentityConnected).toBe('function');
+  expect(
+    ['hydrating', 'guest-local', 'guest-connected', 'account-connected', 'deletion-pending'].map(
+      (mode) => sessionBootstrap.isGroupIdentityConnected?.(mode)
+    )
+  ).toEqual([false, false, true, true, false]);
 });
 
 test('group screens connect only from explicit action handlers', () => {
@@ -549,7 +793,9 @@ test('group screens connect only from explicit action handlers', () => {
 
   expect(groupsScreen).toContain("ensureGuestSession('group-action')");
   expect(joinScreen).toContain("ensureGuestSession('group-action')");
-  expect(groupsScreen).toContain("identityMode === 'hydrating' ? [] : groups");
+  expect(groupsScreen).toContain('const visibleGroups = isGroupIdentityConnected(identityMode) ? groups : [];');
+  expect(groupsScreen).toContain('visibleGroups.find((g) => g.id === detailGroupId)');
+  expect(groupsScreen).toContain('{visibleGroups.map((group) => (');
   expect(groupsScreen).not.toMatch(/useEffect\(\(\)\s*=>\s*\{[^}]*ensureGuestSession/s);
   expect(joinScreen).not.toMatch(/useEffect\(\(\)\s*=>\s*\{[^}]*ensureGuestSession/s);
 });

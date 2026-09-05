@@ -7,6 +7,10 @@ export type IdentityMode =
 
 export type CloudAvailability = 'unknown' | 'online' | 'offline' | 'misconfigured';
 
+export function isGroupIdentityConnected(identityMode: IdentityMode) {
+  return identityMode === 'guest-connected' || identityMode === 'account-connected';
+}
+
 type BootstrapInput = {
   configured: boolean;
   user: { id: string; is_anonymous?: boolean } | null;

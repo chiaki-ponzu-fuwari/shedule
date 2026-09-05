@@ -26,6 +26,7 @@ const ja: Messages = {
   'settings.custom': 'カスタム',
 
   'common.cancel': 'キャンセル',
+  'common.retry': '再試行',
   'common.delete': '削除',
   'common.reset': 'リセット',
 
@@ -265,6 +266,7 @@ const ja: Messages = {
 
   'groupDetail.fetchErr': 'スケジュールの取得に失敗しました',
   'groupDetail.nameUpdateErr': 'グループ名を保存できませんでした。接続を確認して再度お試しください。',
+  'groupDetail.memoUpdateErr': '共有メモを保存できませんでした。接続を確認して再度お試しください。',
   'groupDetail.memberLine': '{n}人のメンバー',
   'groupDetail.tabInfo': 'グループ情報',
   'groupDetail.tabSettings': '共有設定',
@@ -340,6 +342,7 @@ const en: Messages = {
   'settings.custom': 'Custom',
 
   'common.cancel': 'Cancel',
+  'common.retry': 'Retry',
   'common.delete': 'Delete',
   'common.reset': 'Reset',
 
@@ -579,6 +582,7 @@ const en: Messages = {
 
   'groupDetail.fetchErr': 'Could not load schedule',
   'groupDetail.nameUpdateErr': 'Could not save the group name. Check your connection and try again.',
+  'groupDetail.memoUpdateErr': 'Could not save the shared memo. Check your connection and try again.',
   'groupDetail.memberLine': '{n} members',
   'groupDetail.tabInfo': 'Info',
   'groupDetail.tabSettings': 'Sharing',

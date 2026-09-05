@@ -8,9 +8,9 @@ import { useLocalStoresHydrated } from '../hooks/useLocalStoresHydrated';
 import { useSupabaseAuth } from '../hooks/useSupabaseAuth';
 
 export default function RootLayout() {
-  useSupabaseAuth();
-  useGoogleCalendarAutoSync();
   const localStoresHydrated = useLocalStoresHydrated();
+  useSupabaseAuth({ enabled: localStoresHydrated });
+  useGoogleCalendarAutoSync();
 
   if (!localStoresHydrated) {
     return (
