@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, SafeAreaView, Platform, Alert, Switch, Image, Modal as RNModal, ActivityIndicator,
+  TextInput, SafeAreaView, Platform, Alert, Switch, Modal as RNModal, ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,11 +18,14 @@ import { Stamp } from '../../types';
 import { AddStampModal } from '../../components/modals/AddStampModal';
 import { RecurringModal } from '../../components/modals/RecurringModal';
 import { BirthdayModal } from '../../components/modals/BirthdayModal';
+import { AccountBackupCard } from '../../components/settings/AccountBackupCard';
+import { LegalLinksCard } from '../../components/settings/LegalLinksCard';
 import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { runGoogleCalendarSync, GOOGLE_SYNC_NEEDS_LOGIN } from '../../utils/runGoogleCalendarSync';
 import { compressPickedImageUri } from '../../utils/compressPickedImage';
 import { useGoogleSyncStore } from '../../store/googleSyncStore';
 import { useTranslation, dateLocaleTag } from '../../constants/i18n';
+import { PersonalMediaImage } from '../../components/common/PersonalMediaImage';
 
 export default function SettingsScreen() {
   const { t, locale, setLocale } = useTranslation();
@@ -166,6 +169,7 @@ export default function SettingsScreen() {
               onPress={() => { Haptics.selectionAsync(); setLocale('ja'); }}
               accessibilityRole="button"
               accessibilityLabel="日本語"
+              accessibilityState={{ selected: locale === 'ja' }}
             >
               <Text style={[styles.langChipText, locale === 'ja' && styles.langChipTextActive]}>JA</Text>
             </TouchableOpacity>
@@ -174,6 +178,7 @@ export default function SettingsScreen() {
               onPress={() => { Haptics.selectionAsync(); setLocale('en'); }}
               accessibilityRole="button"
               accessibilityLabel="English"
+              accessibilityState={{ selected: locale === 'en' }}
             >
               <Text style={[styles.langChipText, locale === 'en' && styles.langChipTextActive]}>EN</Text>
             </TouchableOpacity>
@@ -220,6 +225,8 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        <AccountBackupCard />
+
         {/* Calendar Settings */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('settings.calendar')}</Text>
@@ -231,6 +238,8 @@ export default function SettingsScreen() {
                   key={opt.value}
                   style={[styles.weekStartBtn, weekStartDay === opt.value && styles.weekStartBtnActive]}
                   onPress={() => { Haptics.selectionAsync(); setWeekStartDay(opt.value); }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: weekStartDay === opt.value }}
                 >
                   <Text style={[styles.weekStartBtnText, weekStartDay === opt.value && styles.weekStartBtnTextActive]}>
                     {t(opt.labelKey)}
@@ -314,7 +323,7 @@ export default function SettingsScreen() {
                   <View style={[styles.imageStampImg, { backgroundColor: stamp.bgColor }]}>
                     {isIcon
                       ? <Ionicons name={iconName as any} size={28} color={stamp.textColor} />
-                      : <Image source={{ uri: stamp.imageUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                      : <PersonalMediaImage domain="stamp" uri={stamp.imageUri} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                     }
                   </View>
                   {!stamp.isDefault && (
@@ -396,7 +405,8 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Google連携 */}
+        {/* Google Calendar sync is currently released on Web only. */}
+        {Platform.OS === 'web' ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('settings.google')}</Text>
           <View style={[styles.card, { marginTop: 12 }]}>
@@ -434,6 +444,8 @@ export default function SettingsScreen() {
                       style={[styles.googleModeBtn, googleSyncMode === opt.key && styles.googleModeBtnActive]}
                       onPress={() => { Haptics.selectionAsync(); setGoogleSyncMode(opt.key); }}
                       activeOpacity={0.85}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: googleSyncMode === opt.key }}
                     >
                       <Text style={[styles.googleModeBtnText, googleSyncMode === opt.key && styles.googleModeBtnTextActive]}>
                         {t(opt.labelKey)}
@@ -446,6 +458,8 @@ export default function SettingsScreen() {
                   style={[styles.googleSyncBtn, syncing && { opacity: 0.6 }]}
                   onPress={handleGoogleSync}
                   disabled={syncing}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: syncing, busy: syncing }}
                 >
                   {syncing ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
@@ -550,6 +564,7 @@ export default function SettingsScreen() {
             )}
           </View>
         </View>
+        ) : null}
 
         {/* About */}
         <View style={styles.section}>
@@ -567,6 +582,8 @@ export default function SettingsScreen() {
             </View>
           </View>
         </View>
+
+        <LegalLinksCard />
 
         <View style={{ height: 32 }} />
       </ScrollView>

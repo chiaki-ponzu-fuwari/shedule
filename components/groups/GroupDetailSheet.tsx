@@ -16,6 +16,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { compressPickedImageUri } from '../../utils/compressPickedImage';
 import { devError } from '../../utils/devLog';
 import { TimelineHourLabel } from '../ui/TimelineHourLabel';
+import { GroupMemberActions } from './MemberActionsSheet';
+import { ReportSheet } from './ReportSheet';
+import { useModerationStore } from '../../store/useModerationStore';
+import type { ModerationReason } from '../../store/moderationStore';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const MINI_CAL_GAP = 8;
@@ -143,6 +147,9 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState(group.name);
   const nameSaveInFlight = useRef(false);
+  const [actionMemberId, setActionMemberId] = useState<string | null>(null);
+  const [reportMemberId, setReportMemberId] = useState<string | null>(null);
+  const [reportEntryId, setReportEntryId] = useState<string | undefined>();
 
   const updateSharedMemo = useGroupStore((s) => s.updateSharedMemo);
   const updateGroupName = useGroupStore((s) => s.updateGroupName);
@@ -154,6 +161,15 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
   const sharedEntries = useGroupStore((s) => s.sharedEntries[group.id] ?? EMPTY_ENTRIES);
   const myUserId = useGroupStore((s) => s.myUserId);
   const myName = useGroupStore((s) => s.myName);
+  const fetchGroups = useGroupStore((s) => s.fetchGroups);
+
+  const blockedUserIds = useModerationStore((s) => s.blockedUserIds);
+  const moderationBusyUserIds = useModerationStore((s) => s.busyUserIds);
+  const fetchBlocks = useModerationStore((s) => s.fetchBlocks);
+  const blockUser = useModerationStore((s) => s.blockUser);
+  const unblockUser = useModerationStore((s) => s.unblockUser);
+  const reportContent = useModerationStore((s) => s.reportContent);
+  const removeAndBanMember = useModerationStore((s) => s.removeAndBanMember);
 
   const entries = useCalendarStore((s) => s.entries);
   const getStamp = useStampStore((s) => s.getStamp);
@@ -205,6 +221,13 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
     });
   }, [visible, group.id, fetchGroupSchedules]);
 
+  useEffect(() => {
+    if (!visible) return;
+    void fetchBlocks().catch((error) => {
+      devError('fetchBlocks UI', error instanceof Error ? error.message : String(error));
+    });
+  }, [visible, fetchBlocks]);
+
   const toggleSetting = (key: keyof GroupSharingSettings) => {
     hapticSelect();
     setSharingSettings(group.id, { ...sharingSettings, [key]: !sharingSettings[key] });
@@ -228,7 +251,12 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
     } catch (error) {
       devError('updateGroupName UI', error instanceof Error ? error.message : String(error));
       if (!feedbackIsCurrent()) return;
-      Alert.alert(t('groups.errTitle'), t('groupDetail.nameUpdateErr'));
+      Alert.alert(
+        t('groups.errTitle'),
+        error instanceof Error && error.name === 'UnsafeSharedContentError'
+          ? t('moderation.contentBlocked')
+          : t('groupDetail.nameUpdateErr')
+      );
     } finally {
       if (nameSaveVersion.current === saveVersion) nameSaveInFlight.current = false;
     }
@@ -249,10 +277,12 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
     const saveVersion = memoSaveVersion.current + 1;
     memoSaveVersion.current = saveVersion;
     const requestGroupId = group.id;
+    let saveError: unknown;
     try {
       await updateSharedMemo(requestGroupId, memo);
       return;
     } catch (error) {
+      saveError = error;
       devError('updateSharedMemo UI', error instanceof Error ? error.message : String(error));
     }
 
@@ -262,6 +292,10 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
       activeGroupIdRef.current === requestGroupId &&
       memoSaveVersion.current === saveVersion;
     if (!feedbackIsCurrent()) return;
+    if (saveError instanceof Error && saveError.name === 'UnsafeSharedContentError') {
+      Alert.alert(t('groups.errTitle'), t('moderation.contentBlocked'));
+      return;
+    }
     if (Platform.OS === 'web') {
       const retry = window.confirm(
         `${t('groups.errTitle')}\n\n${t('groupDetail.memoUpdateErr')}\n\n${t('common.retry')}?`
@@ -355,7 +389,9 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
       await fetchGroupSchedules(group.id);
       hapticNotify();
     } catch (e: any) {
-      const msg = e?.message ?? String(e);
+      const msg = e?.name === 'UnsafeSharedContentError'
+        ? t('moderation.contentBlocked')
+        : e?.message ?? String(e);
       setScheduleError(msg);
       Alert.alert(t('groups.errTitle'), msg);
     } finally {
@@ -363,25 +399,121 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
     }
   };
 
+  const confirmAction = (title: string, message: string, action: () => void) => {
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n\n${message}`)) action();
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.ok'), style: 'destructive', onPress: action },
+    ]);
+  };
+
+  const handleBlock = (userId: string) => {
+    const member = group.members.find((item) => item.id === userId);
+    if (!member || userId === myUserId) return;
+    confirmAction(
+      t('moderation.blockConfirmTitle'),
+      t('moderation.blockConfirmBody', { name: member.name }),
+      () => {
+        void blockUser(group.id, userId)
+          .then(() => {
+            setActionMemberId(null);
+            setSelectedMemberId(null);
+            setExpandedCalMemberId(null);
+          })
+          .catch((error) => {
+            devError('blockUser UI', error instanceof Error ? error.message : String(error));
+            Alert.alert(t('groups.errTitle'), t('moderation.actionFailed'));
+          });
+      }
+    );
+  };
+
+  const handleUnblock = (userId: string) => {
+    void unblockUser(userId)
+      .then(async () => {
+        setActionMemberId(null);
+        await Promise.all([
+          fetchGroups({ force: true }),
+          fetchGroupSchedules(group.id),
+        ]);
+      })
+      .catch((error) => {
+        devError('unblockUser UI', error instanceof Error ? error.message : String(error));
+        Alert.alert(t('groups.errTitle'), t('moderation.actionFailed'));
+      });
+  };
+
+  const handleRemoveAndBan = (userId: string) => {
+    const member = group.members.find((item) => item.id === userId);
+    if (!member || userId === myUserId) return;
+    confirmAction(
+      t('moderation.removeConfirmTitle'),
+      t('moderation.removeConfirmBody', { name: member.name }),
+      () => {
+        void removeAndBanMember(group.id, userId)
+          .then(async () => {
+            setActionMemberId(null);
+            setSelectedMemberId(null);
+            setExpandedCalMemberId(null);
+            await fetchGroups({ force: true });
+          })
+          .catch((error) => {
+            devError('removeAndBanMember UI', error instanceof Error ? error.message : String(error));
+            Alert.alert(t('groups.errTitle'), t('moderation.actionFailed'));
+          });
+      }
+    );
+  };
+
+  const openReport = (userId: string, sharedEntryId?: string) => {
+    if (userId === myUserId) return;
+    setActionMemberId(null);
+    setReportEntryId(sharedEntryId);
+    setReportMemberId(userId);
+  };
+
+  const handleReportSubmit = async (input: { reason: ModerationReason; detail: string }) => {
+    const targetUserId = reportMemberId;
+    if (!targetUserId) return;
+    try {
+      await reportContent({
+        groupId: group.id,
+        targetUserId,
+        sharedEntryId: reportEntryId,
+        ...input,
+      });
+      setReportMemberId(null);
+      setReportEntryId(undefined);
+      Alert.alert(t('moderation.reportReceived'));
+    } catch (error) {
+      devError('reportContent UI', error instanceof Error ? error.message : String(error));
+      Alert.alert(t('groups.errTitle'), t('moderation.actionFailed'));
+    }
+  };
+
   // 列は group.members 全員（shared_entries にまだ行がない人が列から消えるのを防ぐ）
   const myMemberColor = group.members.find(m => m.id === myUserId)?.color ?? '#A78BFA';
+  const blockedUserIdSet = useMemo(() => new Set(blockedUserIds), [blockedUserIds]);
   const tableMembers = useMemo(() => {
-    const list = [...group.members].sort((a, b) => {
+    const list = group.members.filter((member) => !blockedUserIdSet.has(member.id)).sort((a, b) => {
       if (a.id === myUserId) return -1;
       if (b.id === myUserId) return 1;
       return 0;
     });
     return list.map((m) => ({ id: m.id, name: m.name, color: m.color }));
-  }, [group.members, myUserId]);
+  }, [group.members, myUserId, blockedUserIdSet]);
 
   /** 表示は常にグループメンバー名に合わせる（DB の user_name とズレを解消） */
   const sharedEntriesForDisplay = useMemo(() => {
     const nameById = new Map(group.members.map((m) => [m.id, m.name]));
-    return sharedEntries.map((e) => ({
+    return sharedEntries.filter((entry) => !blockedUserIdSet.has(entry.userId)).map((e) => ({
       ...e,
       userName: nameById.get(e.userId) ?? e.userName,
     }));
-  }, [sharedEntries, group.members]);
+  }, [sharedEntries, group.members, blockedUserIdSet]);
 
   const allDates = [...new Set(sharedEntriesForDisplay.map((e) => e.date))].sort();
   // [date][userId] = SharedEntry
@@ -407,6 +539,13 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
     if (calMonth === 12) { setCalYear(calYear + 1); setCalMonth(1); }
     else setCalMonth(calMonth + 1);
   };
+  const viewerIsOwner = group.members.some((member) => member.id === myUserId && member.isOwner);
+  const actionMember = actionMemberId
+    ? group.members.find((member) => member.id === actionMemberId) ?? null
+    : null;
+  const reportMember = reportMemberId
+    ? group.members.find((member) => member.id === reportMemberId) ?? null
+    : null;
 
   return (
     <>
@@ -529,7 +668,7 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
                     <View style={styles.inviteCodeRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.inviteCodeLabel}>{t('groupDetail.inviteCode')}</Text>
-                        <Text style={styles.inviteCode}>{group.inviteCode}</Text>
+                        <Text style={styles.inviteCode} selectable numberOfLines={2}>{group.inviteCode}</Text>
                       </View>
                       <TouchableOpacity style={styles.shareBtn} onPress={() => onShare(group)}>
                         <Ionicons name="share-outline" size={18} color="#FFFFFF" />
@@ -546,6 +685,23 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
                         </View>
                         <Text style={styles.memberName}>{m.name}</Text>
                         {m.isOwner && <View style={styles.ownerBadge}><Text style={styles.ownerText}>{t('groupDetail.owner')}</Text></View>}
+                        {blockedUserIdSet.has(m.id) ? (
+                          <Ionicons name="eye-off-outline" size={16} color={colors.textLight} />
+                        ) : null}
+                        {m.id !== myUserId ? (
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`${m.name}: ${t('moderation.memberActions')}`}
+                            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                            style={styles.memberActionButton}
+                            onPress={() => {
+                              hapticSelect();
+                              setActionMemberId(m.id);
+                            }}
+                          >
+                            <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+                          </TouchableOpacity>
+                        ) : null}
                       </View>
                     ))}
 
@@ -978,6 +1134,16 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
                               <Text style={styles.memberDetailNote}>{e.notes}</Text>
                             )}
                           </View>
+                          {member.id !== myUserId ? (
+                            <TouchableOpacity
+                              accessibilityRole="button"
+                              accessibilityLabel={`${formatShortDate(e.date).date} ${t('moderation.report')}`}
+                              style={styles.entryReportButton}
+                              onPress={() => openReport(member.id, e.id)}
+                            >
+                              <Ionicons name="flag-outline" size={17} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                          ) : null}
                         </View>
                       );
                     })}
@@ -990,6 +1156,34 @@ export function GroupDetailSheet({ group, visible, onClose, onDelete, onShare }:
         </Modal>
       );
     })()}
+
+    {actionMember ? (
+      <GroupMemberActions
+        visible
+        role={actionMember.id === myUserId ? 'self' : viewerIsOwner ? 'owner' : 'member'}
+        member={actionMember}
+        blocked={blockedUserIdSet.has(actionMember.id)}
+        busy={moderationBusyUserIds.includes(actionMember.id)}
+        onClose={() => setActionMemberId(null)}
+        onReport={(member) => openReport(member.id)}
+        onBlock={handleBlock}
+        onUnblock={handleUnblock}
+        onRemoveAndBan={handleRemoveAndBan}
+      />
+    ) : null}
+
+    {reportMember ? (
+      <ReportSheet
+        visible
+        member={reportMember}
+        busy={moderationBusyUserIds.includes(reportMember.id)}
+        onClose={() => {
+          setReportMemberId(null);
+          setReportEntryId(undefined);
+        }}
+        onSubmit={handleReportSubmit}
+      />
+    ) : null}
     </>
   );
 }
@@ -1038,12 +1232,13 @@ const styles = StyleSheet.create({
 
   inviteCodeRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5EFF5', borderRadius: 12, padding: 14, gap: 12 },
   inviteCodeLabel: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
-  inviteCode: { fontSize: 20, fontWeight: '800', color: colors.primary, letterSpacing: 3 },
+  inviteCode: { fontSize: 13, fontWeight: '800', color: colors.primary, letterSpacing: 1 },
   shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   shareBtnText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
 
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
   memberName: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1 },
+  memberActionButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -8 },
   ownerBadge: { backgroundColor: '#DBEAFE', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   ownerText: { fontSize: 11, fontWeight: '700', color: colors.primary },
   avatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
@@ -1210,4 +1405,5 @@ const styles = StyleSheet.create({
   memberDetailDateDay: { fontSize: 11, color: colors.textSecondary },
   memberDetailStamps: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
   memberDetailNote: { fontSize: 12, color: colors.textSecondary, backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  entryReportButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginTop: -8, marginRight: -8 },
 });

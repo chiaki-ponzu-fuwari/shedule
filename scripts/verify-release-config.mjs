@@ -130,6 +130,27 @@ function verifyProductionLegalUrls(config) {
     }
   });
 
+  const legalBase = process.env.EXPO_PUBLIC_LEGAL_BASE_URL?.trim();
+  if (!legalBase) {
+    addFailure('Production requires EXPO_PUBLIC_LEGAL_BASE_URL.');
+  } else {
+    try {
+      const parsed = new URL(legalBase);
+      if (
+        parsed.protocol !== 'https:'
+        || parsed.username
+        || parsed.password
+        || parsed.search
+        || parsed.hash
+        || /YOUR_|PLACEHOLDER/i.test(legalBase)
+      ) {
+        addFailure('EXPO_PUBLIC_LEGAL_BASE_URL must be a real public HTTPS base URL.');
+      }
+    } catch {
+      addFailure('EXPO_PUBLIC_LEGAL_BASE_URL must be a real public HTTPS base URL.');
+    }
+  }
+
   for (const [name, value] of Object.entries(process.env)) {
     if (
       name.startsWith('EXPO_PUBLIC_') &&
@@ -200,7 +221,9 @@ function verifyPrivacyManifest() {
   const expectedCollectedTypes = new Set([
     'NSPrivacyCollectedDataTypeUserID',
     'NSPrivacyCollectedDataTypeName',
+    'NSPrivacyCollectedDataTypeEmailAddress',
     'NSPrivacyCollectedDataTypeOtherUserContent',
+    'NSPrivacyCollectedDataTypePhotosorVideos',
   ]);
   const actualCollectedTypes = new Set(
     collectedData.map((entry) => entry.NSPrivacyCollectedDataType),
@@ -256,6 +279,30 @@ function verifyNativeIosIdentity() {
   if (!pbxproj.includes('PrivacyInfo.xcprivacy in Resources')) {
     addFailure('PrivacyInfo.xcprivacy must be included in the iOS target resources.');
   }
+  if (
+    !pbxproj.includes('InfoPlist.strings in Resources')
+    || !pbxproj.includes('app/en.lproj/InfoPlist.strings')
+    || !pbxproj.includes('app/ja.lproj/InfoPlist.strings')
+  ) {
+    addFailure('Localized InfoPlist.strings must be included in the iOS target resources.');
+  }
+}
+
+function verifyPermissionLocalizations(expo) {
+  expectEqual('expo.locales.ja', expo.locales?.ja, './locales/ja.json');
+  expectEqual('expo.locales.en', expo.locales?.en, './locales/en.json');
+  const ja = readJson('locales/ja.json');
+  const en = readJson('locales/en.json');
+  for (const [language, locale] of [['ja', ja], ['en', en]]) {
+    if (!locale) continue;
+    if (
+      typeof locale.CFBundleDisplayName !== 'string'
+      || typeof locale.NSPhotoLibraryUsageDescription !== 'string'
+      || locale.NSPhotoLibraryUsageDescription.length < 20
+    ) {
+      addFailure(`${language} permission localization is incomplete.`);
+    }
+  }
 }
 
 const appConfig = readJson('app.json');
@@ -267,6 +314,7 @@ if (appConfig?.expo) {
   expectEqual('expo.ios.bundleIdentifier', expo.ios?.bundleIdentifier, expectedIdentity.iosBundleIdentifier);
   expectEqual('expo.android.package', expo.android?.package, expectedIdentity.androidPackage);
   verifyReleaseAssetMappings(expo);
+  verifyPermissionLocalizations(expo);
   verifyLocalAssets(expo);
   verifyProductionLegalUrls(expo);
 } else if (appConfig) {

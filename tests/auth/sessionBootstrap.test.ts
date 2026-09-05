@@ -370,6 +370,76 @@ describe('group cloud entry points', () => {
     });
   });
 
+  test('synchronously hides and overwrites every user-scoped cache when auth signs out', () => {
+    jest.resetModules();
+    const storage = (
+      require('@react-native-async-storage/async-storage') as {
+        default: { setItem: jest.Mock };
+      }
+    ).default;
+    jest.doMock('../../lib/supabase', () => ({
+      getSupabaseClient: () => null,
+      requireSupabaseClient: jest.fn(),
+    }));
+    jest.doMock('../../store/appSessionStore', () => ({
+      useAppSessionStore: { getState: () => ({ ensureGuestSession: jest.fn() }) },
+    }));
+
+    const groupStore = (require('../../store/groupStore') as typeof import('../../store/groupStore')).useGroupStore;
+    groupStore.setState({
+      cachedUserId: 'old-user',
+      myUserId: 'old-user',
+      myName: 'Old user',
+      loading: true,
+      groups: [{ id: 'old-group' } as never],
+      sharingSettings: {
+        'old-group': {
+          shareMain: false,
+          shareMini: true,
+          shareNotes: true,
+          shareTimeSchedule: true,
+        },
+      },
+      sharedEntries: { 'old-group': [{ id: 'old-entry' } as never] },
+      groupIconUris: { 'old-group': 'file:///old-user-icon.png' },
+    });
+    storage.setItem.mockClear();
+
+    groupStore.getState().setAuthUserId(null);
+
+    expect(groupStore.getState()).toMatchObject({
+      cachedUserId: '',
+      myUserId: '',
+      myName: 'わたし',
+      loading: false,
+      groups: [],
+      sharingSettings: {},
+      sharedEntries: {},
+      groupIconUris: {},
+    });
+    const persistedWrite = storage.setItem.mock.calls.at(-1);
+    expect(persistedWrite?.[0]).toBe('group-storage-v2');
+    expect(JSON.parse(persistedWrite?.[1] ?? '{}').state).toMatchObject({
+      cachedUserId: '',
+      myName: 'わたし',
+      groups: [],
+      sharingSettings: {},
+      groupIconUris: {},
+    });
+
+    groupStore.getState().setMyName('New guest');
+    groupStore.getState().setAuthUserId('new-guest');
+    expect(groupStore.getState()).toMatchObject({
+      cachedUserId: 'new-guest',
+      myUserId: 'new-guest',
+      myName: 'New guest',
+      groups: [],
+      sharingSettings: {},
+      sharedEntries: {},
+      groupIconUris: {},
+    });
+  });
+
   test('rejects failed memo and name writes while recording the recoverable cloud error', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const ensureGuestSession = jest.fn(async () => 'group-user');
@@ -379,11 +449,7 @@ describe('group cloud entry points', () => {
       error: { message: 'permission denied' },
     }));
     const client = {
-      from: jest.fn(() => ({
-        update: jest.fn(() => ({
-          eq: jest.fn(() => ({ select: jest.fn(() => ({ maybeSingle })) })),
-        })),
-      })),
+      rpc: jest.fn(() => ({ single: maybeSingle })),
     };
 
     jest.resetModules();
@@ -767,6 +833,7 @@ describe('group detail memo save behavior', () => {
     jest.dontMock('../../store/groupStore');
     jest.dontMock('../../store/calendarStore');
     jest.dontMock('../../store/stampStore');
+    jest.dontMock('../../store/useModerationStore');
     jest.dontMock('../../constants/i18n');
     jest.dontMock('@expo/vector-icons');
     jest.dontMock('../../utils/haptics');
@@ -785,11 +852,25 @@ describe('group detail memo save behavior', () => {
       sharedEntries: {},
       myUserId: 'member-1',
       myName: 'Member',
+      fetchGroups: jest.fn(async () => undefined),
+    };
+    const moderationState = {
+      blockedUserIds: [],
+      busyUserIds: [],
+      fetchBlocks: jest.fn(async () => undefined),
+      blockUser: jest.fn(async () => undefined),
+      unblockUser: jest.fn(async () => undefined),
+      reportContent: jest.fn(async () => undefined),
+      removeAndBanMember: jest.fn(async () => undefined),
     };
 
     jest.resetModules();
     jest.doMock('../../store/groupStore', () => ({
       useGroupStore: (selector: (state: typeof groupState) => unknown) => selector(groupState),
+    }));
+    jest.doMock('../../store/useModerationStore', () => ({
+      useModerationStore: (selector: (state: typeof moderationState) => unknown) =>
+        selector(moderationState),
     }));
     jest.doMock('../../store/calendarStore', () => ({
       useCalendarStore: (selector: (state: { entries: object }) => unknown) =>

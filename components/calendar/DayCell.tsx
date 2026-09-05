@@ -1,12 +1,14 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { DayInfo, DayEntry, Stamp } from '../../types';
 import { colors } from '../../constants/colors';
+import { PersonalMediaImage } from '../common/PersonalMediaImage';
 
 /** 左右それぞれのマージン（MonthlyView の列幅計算と揃える） */
 export const DAY_CELL_MARGIN_H = 2;
-const CELL_H_SHRINK = 12;
+// The 7px travel lane sits above the date without stealing space from dense bands.
+const CELL_H_SHRINK = 5;
 const CELL_H = 74 - CELL_H_SHRINK;
 
 interface Props {
@@ -64,8 +66,8 @@ export function DayCell({
           {day.date.getDate()}
         </Text>
         <View style={styles.dotsRow}>
-          {day.specialDate && <View style={[styles.dot, { backgroundColor: '#60A5FA' }]} />}
-          {hasNotes && <View style={[styles.dot, { backgroundColor: '#FFB3CC' }]} />}
+          {day.specialDate && <View testID="special-date-dot" style={[styles.dot, { backgroundColor: '#60A5FA' }]} />}
+          {hasNotes && <View testID="notes-dot" style={[styles.dot, { backgroundColor: '#FFB3CC' }]} />}
         </View>
       </View>
 
@@ -80,7 +82,7 @@ export function DayCell({
             />
           </View>
         ) : (
-          <Image source={{ uri: imageUri }} style={styles.imageStamp} />
+          <PersonalMediaImage domain={['calendar', 'stamp']} uri={imageUri} style={styles.imageStamp} />
         )
       ) : null}
 
@@ -89,7 +91,7 @@ export function DayCell({
         {/* ミニスタンプ行 */}
         <View style={styles.miniRow}>
           {leftMiniStamp ? (
-            <View style={[styles.miniBar, { backgroundColor: leftMiniStamp.bgColor }]}>
+            <View testID="mini-stamp-band-left" style={[styles.miniBar, { backgroundColor: leftMiniStamp.bgColor }]}>
               <Text style={[styles.miniText, { color: leftMiniStamp.textColor }]} numberOfLines={1}>
                 {leftMiniStamp.text}
               </Text>
@@ -98,7 +100,7 @@ export function DayCell({
             <View style={styles.miniBarEmpty} />
           )}
           {rightMiniStamp ? (
-            <View style={[styles.miniBar, { backgroundColor: rightMiniStamp.bgColor }]}>
+            <View testID="mini-stamp-band-right" style={[styles.miniBar, { backgroundColor: rightMiniStamp.bgColor }]}>
               <Text style={[styles.miniText, { color: rightMiniStamp.textColor }]} numberOfLines={1}>
                 {rightMiniStamp.text}
               </Text>
@@ -110,7 +112,7 @@ export function DayCell({
 
         {/* メインスタンプ帯（下枠まで塗り潰し）*/}
         {mainStamp ? (
-          <View style={[styles.mainBand, { backgroundColor: mainStamp.bgColor }]}>
+          <View testID="main-stamp-band" style={[styles.mainBand, { backgroundColor: mainStamp.bgColor }]}>
             <Text style={[styles.mainBandText, { color: mainStamp.textColor }]} numberOfLines={1}>
               {mainStamp.text}
             </Text>
@@ -153,13 +155,13 @@ const styles = StyleSheet.create({
   // 左上：日付固定（角に寄せて“中身領域”を広く見せる）
   dateAnchor: {
     position: 'absolute',
-    top: 2,
+    top: 9,
     left: 2,
     alignItems: 'flex-start',
   },
   imageStamp: {
     position: 'absolute',
-    top: 2,
+    top: 9,
     right: 2,
     width: 20,
     height: 20,

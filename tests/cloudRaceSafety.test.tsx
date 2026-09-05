@@ -383,14 +383,9 @@ describe('group async generations', () => {
   });
 
   test('stops a delayed delete without clearing the new user cache or reporting offline', async () => {
-    const sharedDelete = deferred<{ error: null }>();
-    const secondEq = jest.fn(() => sharedDelete.promise);
-    const firstEq = jest.fn(() => ({ eq: secondEq }));
+    const leaveRequest = deferred<{ error: null }>();
     const client = {
-      from: jest.fn((table: string) => {
-        if (table !== 'shared_entries') throw new Error(`unexpected table: ${table}`);
-        return { delete: jest.fn(() => ({ eq: firstEq })) };
-      }),
+      rpc: jest.fn(() => leaveRequest.promise),
     };
     const sessionState = mockGroupStoreDependencies(client);
     const { useGroupStore } =
@@ -402,10 +397,10 @@ describe('group async generations', () => {
     await flushPromises();
     useGroupStore.getState().setAuthUserId('user-b');
     useGroupStore.setState({ groups: [userBGroup], cachedUserId: 'user-b' });
-    sharedDelete.resolve({ error: null });
+    leaveRequest.resolve({ error: null });
 
     await expect(request).rejects.toThrow(/認証状態が変更/);
-    expect(client.from).toHaveBeenCalledTimes(1);
+    expect(client.rpc).toHaveBeenCalledTimes(1);
     expect(useGroupStore.getState().groups).toEqual([userBGroup]);
     expect(sessionState.setCloudOffline).not.toHaveBeenCalled();
     expect(sessionState.setCloudError).not.toHaveBeenCalled();
@@ -434,7 +429,7 @@ describe('group async generations', () => {
     await flushPromises();
     useGroupStore.getState().setAuthUserId('user-b');
     const userBEntries = [
-      { userId: 'user-b', userName: 'B', userColor: '#222222', date: '2026-09-06' },
+      { id: 'entry-b', groupId: 'shared-group', userId: 'user-b', userName: 'B', userColor: '#222222', date: '2026-09-06' },
     ];
     useGroupStore.setState({ sharedEntries: { 'shared-group': userBEntries } });
     schedules.resolve({
@@ -485,7 +480,7 @@ describe('group async generations', () => {
       require('../store/groupStore') as typeof import('../store/groupStore');
     useGroupStore.getState().setAuthUserId('user-a');
     const currentEntries = [
-      { userId: 'user-a', userName: 'A', userColor: '#111111', date: '2026-09-06' },
+      { id: 'entry-a', groupId: 'shared-group', userId: 'user-a', userName: 'A', userColor: '#111111', date: '2026-09-06' },
     ];
     useGroupStore.setState({ sharedEntries: { 'shared-group': currentEntries } });
 
@@ -522,17 +517,8 @@ describe('server-confirmed group edits', () => {
   test('keeps the persisted memo and name when the server rejects edits', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const client = {
-      from: jest.fn(() => ({
-        update: jest.fn(() => ({
-          eq: jest.fn(() => ({
-            select: jest.fn(() => ({
-              maybeSingle: jest.fn(async () => ({
-                data: null,
-                error: { message: 'permission denied' },
-              })),
-            })),
-          })),
-        })),
+      rpc: jest.fn(() => ({
+        single: jest.fn(async () => ({ data: null, error: { message: 'permission denied' } })),
       })),
     };
     mockGroupStoreDependencies(client);
@@ -560,13 +546,7 @@ describe('server-confirmed group edits', () => {
       error: null;
     }>();
     const client = {
-      from: jest.fn(() => ({
-        update: jest.fn(() => ({
-          eq: jest.fn(() => ({
-            select: jest.fn(() => ({ maybeSingle: jest.fn(() => serverWrite.promise) })),
-          })),
-        })),
-      })),
+      rpc: jest.fn(() => ({ single: jest.fn(() => serverWrite.promise) })),
     };
     mockGroupStoreDependencies(client);
     const { useGroupStore } =
@@ -589,14 +569,8 @@ describe('server-confirmed group edits', () => {
   test('does not commit memo or name when the update matched no server row', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const client = {
-      from: jest.fn(() => ({
-        update: jest.fn(() => ({
-          eq: jest.fn(() => ({
-            select: jest.fn(() => ({
-              maybeSingle: jest.fn(async () => ({ data: null, error: null })),
-            })),
-          })),
-        })),
+      rpc: jest.fn(() => ({
+        single: jest.fn(async () => ({ data: null, error: null })),
       })),
     };
     mockGroupStoreDependencies(client);
@@ -624,24 +598,20 @@ describe('server-confirmed group edits', () => {
       error: { message: string };
     }>();
     const updates: string[] = [];
-    const update = jest.fn((patch: { shared_memo: string }) => {
-      updates.push(patch.shared_memo);
+    const rpc = jest.fn((_name: string, params: { p_memo: string }) => {
+      updates.push(params.p_memo);
       return {
-        eq: jest.fn(() => ({
-          select: jest.fn(() => ({
-            maybeSingle: jest.fn(() =>
-              patch.shared_memo === 'memo A'
-                ? firstWrite.promise
-                : Promise.resolve({
-                    data: { id: 'old-group', shared_memo: patch.shared_memo },
-                    error: null,
-                  })
-            ),
-          })),
-        })),
+        single: jest.fn(() =>
+          params.p_memo === 'memo A'
+            ? firstWrite.promise
+            : Promise.resolve({
+                data: { id: 'old-group', shared_memo: params.p_memo },
+                error: null,
+              })
+        ),
       };
     });
-    const client = { from: jest.fn(() => ({ update })) };
+    const client = { rpc };
     mockGroupStoreDependencies(client);
     const { useGroupStore } =
       require('../store/groupStore') as typeof import('../store/groupStore');
@@ -667,24 +637,20 @@ describe('server-confirmed group edits', () => {
       error: null;
     }>();
     const updates: string[] = [];
-    const update = jest.fn((patch: { name: string }) => {
-      updates.push(patch.name);
+    const rpc = jest.fn((_name: string, params: { p_name: string }) => {
+      updates.push(params.p_name);
       return {
-        eq: jest.fn(() => ({
-          select: jest.fn(() => ({
-            maybeSingle: jest.fn(() =>
-              patch.name === 'Name A'
-                ? firstWrite.promise
-                : Promise.resolve({
-                    data: { id: 'old-group', name: patch.name },
-                    error: null,
-                  })
-            ),
-          })),
-        })),
+        single: jest.fn(() =>
+          params.p_name === 'Name A'
+            ? firstWrite.promise
+            : Promise.resolve({
+                data: { id: 'old-group', name: params.p_name },
+                error: null,
+              })
+        ),
       };
     });
-    const client = { from: jest.fn(() => ({ update })) };
+    const client = { rpc };
     mockGroupStoreDependencies(client);
     const { useGroupStore } =
       require('../store/groupStore') as typeof import('../store/groupStore');

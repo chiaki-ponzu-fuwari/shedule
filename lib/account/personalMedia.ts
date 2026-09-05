@@ -22,6 +22,7 @@ export interface DurableMediaStaging {
   write(id: string, bytes: ArrayBuffer): Promise<string>;
   read(stagedUri: string): Promise<ArrayBuffer>;
   remove(stagedUri: string): Promise<void>;
+  exists(stagedUri: string): Promise<boolean>;
 }
 
 export interface BrowserMediaDatabase {
@@ -64,6 +65,13 @@ interface PrepareInput {
   persistPending(mutation: PendingMediaUpload): Promise<void>;
 }
 
+interface PersonalMediaPreparationDependencies {
+  processor: PersonalImageProcessor;
+  staging: DurableMediaStaging;
+  cleanupQueue: MediaCleanupQueue;
+  uuid?: () => string;
+}
+
 interface ReplaceInput {
   mutation: PendingMediaUpload;
   previousObjectKey?: string;
@@ -92,6 +100,15 @@ const MEDIA_DOMAINS: readonly PersonalMediaDomain[] = ['calendar', 'diary', 'sta
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_OWNER_PATTERN = /^[A-Za-z0-9_-]+$/;
+const NATIVE_STAGE_URI_PATTERN =
+  /^file:\/\/.*\/recoto-media-outbox\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jpg$/i;
+const BROWSER_STAGE_URI_PATTERN =
+  /^recoto-idb:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.jpg$/i;
+
+export function isDurablePersonalMediaStagedUri(value: unknown): value is string {
+  return typeof value === 'string'
+    && (NATIVE_STAGE_URI_PATTERN.test(value) || BROWSER_STAGE_URI_PATTERN.test(value));
+}
 
 function assertOwner(ownerId: string) {
   if (!SAFE_OWNER_PATTERN.test(ownerId)) throw new Error('Invalid personal media owner');
@@ -142,10 +159,7 @@ function assertProcessedJpeg(processed: ProcessedJpeg) {
 function assertPendingMutation(mutation: PendingMediaUpload) {
   assertUuid(mutation.mutationId);
   assertObjectKey(mutation.ownerId, mutation.domain, mutation.objectKey);
-  if (
-    !mutation.stagedUri.startsWith('file://') &&
-    !mutation.stagedUri.startsWith('recoto-idb://')
-  ) {
+  if (!isDurablePersonalMediaStagedUri(mutation.stagedUri)) {
     throw new Error('Personal media retry source is not in durable local storage');
   }
   if (!Number.isSafeInteger(mutation.attempts) || mutation.attempts < 0) {
@@ -153,38 +167,12 @@ function assertPendingMutation(mutation: PendingMediaUpload) {
   }
 }
 
-export function createPersonalMediaService(dependencies: {
-  processor: PersonalImageProcessor;
-  staging: DurableMediaStaging;
-  storage: PersonalMediaStorage;
-  cleanupQueue: MediaCleanupQueue;
-  uuid?: () => string;
-}): PersonalMediaService {
-  const {
-    processor,
-    staging,
-    storage,
-    cleanupQueue,
-    uuid = () => Crypto.randomUUID(),
-  } = dependencies;
-
-  const finishStagedFile = async (
-    mutation: PendingMediaUpload,
-    discardPending: (mutationId: string) => Promise<void>,
-  ) => {
-    // The durable job is dependency-gated by mutationId, so it cannot remove
-    // the retry source until the outbox transition below has completed.
-    await cleanupQueue.enqueueStagedFile(mutation.stagedUri, mutation.mutationId);
-    await discardPending(mutation.mutationId);
-    try {
-      await staging.remove(mutation.stagedUri);
-      await cleanupQueue.completeStagedFile(mutation.stagedUri);
-      return false;
-    } catch {
-      return true;
-    }
-  };
-
+export function createPersonalMediaPreparationService({
+  processor,
+  staging,
+  cleanupQueue,
+  uuid = () => Crypto.randomUUID(),
+}: PersonalMediaPreparationDependencies): Pick<PersonalMediaService, 'prepare'> {
   return {
     async prepare({ ownerId, domain, sourceUri, persistPending }) {
       assertOwner(ownerId);
@@ -216,6 +204,38 @@ export function createPersonalMediaService(dependencies: {
       }
       return mutation;
     },
+  };
+}
+
+export function createPersonalMediaService(dependencies: PersonalMediaPreparationDependencies & {
+  storage: PersonalMediaStorage;
+}): PersonalMediaService {
+  const {
+    staging,
+    storage,
+    cleanupQueue,
+  } = dependencies;
+  const preparation = createPersonalMediaPreparationService(dependencies);
+
+  const finishStagedFile = async (
+    mutation: PendingMediaUpload,
+    discardPending: (mutationId: string) => Promise<void>,
+  ) => {
+    // The durable job is dependency-gated by mutationId, so it cannot remove
+    // the retry source until the outbox transition below has completed.
+    await cleanupQueue.enqueueStagedFile(mutation.stagedUri, mutation.mutationId);
+    await discardPending(mutation.mutationId);
+    try {
+      await staging.remove(mutation.stagedUri);
+      await cleanupQueue.completeStagedFile(mutation.stagedUri);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  return {
+    prepare: preparation.prepare,
 
     async uploadPending(mutation) {
       assertPendingMutation(mutation);
@@ -411,6 +431,29 @@ export function createExpoMediaStaging(): DurableMediaStaging {
   const ensureDirectory = async () => {
     await FileSystem.makeDirectoryAsync(directoryUri, { intermediates: true });
   };
+  const requireOwnedStageUri = (stagedUri: string) => {
+    let isOwned = false;
+    try {
+      const candidate = new URL(stagedUri);
+      const directory = new URL(directoryUri);
+      const directoryPath = directory.pathname.endsWith('/')
+        ? directory.pathname
+        : `${directory.pathname}/`;
+      const fileName = candidate.pathname.startsWith(directoryPath)
+        ? candidate.pathname.slice(directoryPath.length)
+        : '';
+      isOwned = candidate.protocol === 'file:'
+        && candidate.host === directory.host
+        && !fileName.includes('/')
+        && fileName.endsWith('.jpg')
+        && UUID_PATTERN.test(fileName.slice(0, -4));
+    } catch {
+      isOwned = false;
+    }
+    if (!isDurablePersonalMediaStagedUri(stagedUri) || !isOwned) {
+      throw new Error('Invalid native personal media staging URI');
+    }
+  };
   return {
     async write(id, bytes) {
       assertUuid(id);
@@ -422,6 +465,7 @@ export function createExpoMediaStaging(): DurableMediaStaging {
       return fileUri;
     },
     async read(stagedUri) {
+      requireOwnedStageUri(stagedUri);
       const info = await FileSystem.getInfoAsync(stagedUri);
       if (!info.exists) throw new Error('Staged personal media is no longer available');
       const encoded = await FileSystem.readAsStringAsync(stagedUri, {
@@ -430,13 +474,15 @@ export function createExpoMediaStaging(): DurableMediaStaging {
       return base64ToArrayBuffer(encoded);
     },
     async remove(stagedUri) {
+      requireOwnedStageUri(stagedUri);
       await FileSystem.deleteAsync(stagedUri, { idempotent: true });
+    },
+    async exists(stagedUri) {
+      requireOwnedStageUri(stagedUri);
+      return (await FileSystem.getInfoAsync(stagedUri)).exists;
     },
   };
 }
-
-const BROWSER_STAGE_URI_PATTERN =
-  /^recoto-idb:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.jpg$/i;
 
 function browserStageId(uri: string) {
   const id = BROWSER_STAGE_URI_PATTERN.exec(uri)?.[1];
@@ -460,6 +506,9 @@ export function createBrowserMediaStaging(
     },
     async remove(stagedUri) {
       await database.remove(browserStageId(stagedUri));
+    },
+    async exists(stagedUri) {
+      return (await database.get(browserStageId(stagedUri))) !== null;
     },
   };
 }
@@ -534,14 +583,17 @@ async function runBrowserMediaTransaction<T>(
 export function createIndexedDbMediaDatabase(
   factory: IDBFactory | undefined = globalThis.indexedDB,
 ): BrowserMediaDatabase {
-  if (!factory) throw new Error('Durable browser storage is unavailable');
+  const requireFactory = () => {
+    if (!factory) throw new Error('Durable browser storage is unavailable');
+    return factory;
+  };
   return {
     async put(id, bytes) {
-      await runBrowserMediaTransaction(factory, 'readwrite', (store) =>
+      await runBrowserMediaTransaction(requireFactory(), 'readwrite', (store) =>
         store.put(bytes.slice(0), id));
     },
     async get(id) {
-      const stored = await runBrowserMediaTransaction<unknown>(factory, 'readonly', (store) =>
+      const stored = await runBrowserMediaTransaction<unknown>(requireFactory(), 'readonly', (store) =>
         store.get(id));
       if (stored === undefined) return null;
       if (!(stored instanceof ArrayBuffer)) {
@@ -550,7 +602,7 @@ export function createIndexedDbMediaDatabase(
       return stored.slice(0);
     },
     async remove(id) {
-      await runBrowserMediaTransaction(factory, 'readwrite', (store) => store.delete(id));
+      await runBrowserMediaTransaction(requireFactory(), 'readwrite', (store) => store.delete(id));
     },
   };
 }

@@ -1,0 +1,14 @@
+project_id = "recoto"
+
+# This endpoint must remain callable after Auth has removed the user. Its
+# 256-bit client receipt is verified again inside the function and by the
+# service-role-only database RPC. Every other account endpoint keeps the
+# platform JWT gate enabled and also verifies the user with auth.getUser().
+[functions.account-deletion-status]
+verify_jwt = false
+
+# Apple authenticates this public webhook with an RS256 JWS. The function
+# verifies Apple's JWKS, issuer, audience, issued-at/optional expiry, event ID,
+# type, subject, and credential generation before any service-role lifecycle RPC.
+[functions.apple-account-notification]
+verify_jwt = false

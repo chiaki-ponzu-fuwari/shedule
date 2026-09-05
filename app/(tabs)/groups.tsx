@@ -43,6 +43,10 @@ function makeInviteUrl(code: string): string {
   return `recoto://join/${code}`;
 }
 
+function inviteCodePreview(code: string): string {
+  return code.length > 12 ? `${code.slice(0, 8)}…${code.slice(-4)}` : code;
+}
+
 export default function GroupsScreen() {
   const { t, locale } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -290,9 +294,9 @@ export default function GroupsScreen() {
                 </View>
                 <View style={styles.groupInfo}>
                   <Text style={styles.groupName}>{group.name}</Text>
-                  <Text style={styles.groupMembers}>
-                    {group.members.length}{locale === 'ja' ? '' : ' '}{t('groups.membersUnit')} · {t('groups.code')}: {group.inviteCode}
-                  </Text>
+                      <Text style={styles.groupMembers}>
+                        {group.members.length}{locale === 'ja' ? '' : ' '}{t('groups.membersUnit')} · {t('groups.code')}: {inviteCodePreview(group.inviteCode)}
+                      </Text>
                 </View>
                 <View style={styles.memberAvatars}>
                   {group.members.slice(0, 3).map((m, i) => (
@@ -413,10 +417,10 @@ export default function GroupsScreen() {
               style={[styles.textInput, styles.codeInput]}
               value={joinCode}
               onChangeText={(text) => setJoinCode(text.toUpperCase())}
-              placeholder="ABC123"
+              placeholder={t('groups.invitePlaceholder')}
               placeholderTextColor={colors.textLight}
               autoCapitalize="characters"
-              maxLength={8}
+              maxLength={32}
               autoFocus
             />
             <View style={styles.modalBtns}>
@@ -538,7 +542,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 4, marginTop: 8 },
   fieldLabel: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: 16, marginBottom: 8 },
   textInput: { borderWidth: 2, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: colors.text },
-  codeInput: { textAlign: 'center', fontSize: 24, fontWeight: '800', letterSpacing: 6 },
+  codeInput: { textAlign: 'center', fontSize: 16, fontWeight: '800', letterSpacing: 1 },
   emojiRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   emojiBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   emojiBtnActive: { borderColor: colors.primary, backgroundColor: '#DBEAFE' },

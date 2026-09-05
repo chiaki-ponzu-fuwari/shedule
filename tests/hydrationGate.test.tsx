@@ -12,23 +12,36 @@ describe('root hydration gate', () => {
   function loadLayout(initialState: HydrationState) {
     let hydrationState = initialState;
     const useSupabaseAuth = jest.fn();
+    const useAccountBootstrap = jest.fn(() => ({ status: 'ready', retry: jest.fn() }));
     const useGoogleCalendarAutoSync = jest.fn();
+    const useAccountCloudSync = jest.fn();
 
     jest.resetModules();
+    const persisted = new Map<string, string>();
+    jest.doMock('@react-native-async-storage/async-storage', () => ({
+      __esModule: true,
+      default: {
+        getItem: jest.fn(async (key: string) => persisted.get(key) ?? null),
+        setItem: jest.fn(async (key: string, value: string) => { persisted.set(key, value); }),
+        removeItem: jest.fn(async (key: string) => { persisted.delete(key); }),
+      },
+    }));
     jest.doMock('../hooks/useLocalStoresHydrated', () => ({
       useLocalStoresHydration: () => hydrationState,
     }));
     jest.doMock('../hooks/useSupabaseAuth', () => ({ useSupabaseAuth }));
+    jest.doMock('../hooks/useAccountBootstrap', () => ({ useAccountBootstrap }));
     jest.doMock('../hooks/useGoogleCalendarAutoSync', () => ({
       useGoogleCalendarAutoSync,
     }));
+    jest.doMock('../hooks/useAccountCloudSync', () => ({ useAccountCloudSync }));
     jest.doMock('expo-router', () => {
       const React = require('react') as typeof import('react');
       const { View } = require('react-native') as typeof import('react-native');
       const Stack = ({ children }: { children?: React.ReactNode }) =>
         React.createElement(View, null, children);
       Stack.Screen = () => null;
-      return { Stack };
+      return { Stack, usePathname: () => '/' };
     });
     jest.doMock('react-native-gesture-handler', () => {
       const { View } = require('react-native') as typeof import('react-native');
@@ -90,6 +103,22 @@ describe('root hydration gate', () => {
     rendered.unmount();
   });
 
+  test('localizes the recovery screen without exposing internal storage errors', () => {
+    const retry = jest.fn();
+    const loaded = loadLayout({ status: 'failed', retry });
+    const { useLocaleStore } = require('../store/localeStore') as typeof import('../store/localeStore');
+    useLocaleStore.setState({ locale: 'en' });
+
+    const rendered = loaded.testing.render(
+      loaded.React.createElement(loaded.layout.HydrationGate!),
+    );
+
+    expect(rendered.getByText('Saved data could not be opened')).toBeTruthy();
+    loaded.testing.fireEvent.press(rendered.getByText('Retry'));
+    expect(retry).toHaveBeenCalledTimes(1);
+    rendered.unmount();
+  });
+
   test('a real storage read failure starts no persisted writes, auth observer, or auto sync', async () => {
     const storage = {
       getItem: jest.fn(async () => {
@@ -99,7 +128,9 @@ describe('root hydration gate', () => {
       removeItem: jest.fn(async () => undefined),
     };
     const useSupabaseAuth = jest.fn();
+    const useAccountBootstrap = jest.fn(() => ({ status: 'ready', retry: jest.fn() }));
     const useGoogleCalendarAutoSync = jest.fn();
+    const useAccountCloudSync = jest.fn();
 
     jest.resetModules();
     jest.dontMock('../hooks/useLocalStoresHydrated');
@@ -108,16 +139,18 @@ describe('root hydration gate', () => {
       default: storage,
     }));
     jest.doMock('../hooks/useSupabaseAuth', () => ({ useSupabaseAuth }));
+    jest.doMock('../hooks/useAccountBootstrap', () => ({ useAccountBootstrap }));
     jest.doMock('../hooks/useGoogleCalendarAutoSync', () => ({
       useGoogleCalendarAutoSync,
     }));
+    jest.doMock('../hooks/useAccountCloudSync', () => ({ useAccountCloudSync }));
     jest.doMock('expo-router', () => {
       const React = require('react') as typeof import('react');
       const { View } = require('react-native') as typeof import('react-native');
       const Stack = ({ children }: { children?: React.ReactNode }) =>
         React.createElement(View, null, children);
       Stack.Screen = () => null;
-      return { Stack };
+      return { Stack, usePathname: () => '/' };
     });
     jest.doMock('react-native-gesture-handler', () => {
       const { View } = require('react-native') as typeof import('react-native');

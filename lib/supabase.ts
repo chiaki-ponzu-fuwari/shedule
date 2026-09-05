@@ -1,5 +1,11 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+import {
+  createProviderTokenStrippingStorage,
+  createSupabaseAuthStorage,
+} from './supabaseAuthStorage';
 
 const CONFIGURATION_ERROR_MESSAGE =
   'グループ機能の接続設定が完了していません。' +
@@ -14,54 +20,74 @@ function readConfiguration() {
   return { url, anonKey };
 }
 
+type BrowserStorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
 /**
- * Web では localStorage を使う（AsyncStorage だけだとセッションが復元されないことがある）。
- * react-native の Platform はこのモジュール読み込み時点では未定義なことがあるため使わない。
+ * Web keeps account credentials in same-origin localStorage. Storage failures
+ * are deliberately observable: treating quota/private-mode failures as a
+ * successful auth commit could lose the only resumable target session.
  */
-function isBrowserLocalStorageAvailable() {
-  if (typeof window === 'undefined') return false;
-  try {
-    const ls = window.localStorage;
-    return typeof ls !== 'undefined' && typeof ls.getItem === 'function';
-  } catch {
-    return false;
-  }
+export function createBrowserAuthStorage(
+  resolveStorage: () => BrowserStorageLike = () => {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      throw new Error('Web account storage is unavailable');
+    }
+    return window.localStorage;
+  },
+) {
+  return {
+    getItem: async (key: string) => resolveStorage().getItem(key),
+    setItem: async (key: string, value: string) => {
+      const storage = resolveStorage();
+      storage.setItem(key, value);
+      if (storage.getItem(key) !== value) {
+        throw new Error('Web account storage write verification failed');
+      }
+    },
+    removeItem: async (key: string) => {
+      const storage = resolveStorage();
+      storage.removeItem(key);
+      if (storage.getItem(key) !== null) {
+        throw new Error('Web account storage removal verification failed');
+      }
+    },
+  };
 }
 
-const authStorage = {
-  getItem: (key: string) => {
-    if (isBrowserLocalStorageAvailable()) {
-      try {
-        return Promise.resolve(window.localStorage.getItem(key));
-      } catch {
-        return Promise.resolve(null);
-      }
-    }
-    return AsyncStorage.getItem(key);
-  },
-  setItem: (key: string, value: string) => {
-    if (isBrowserLocalStorageAvailable()) {
-      try {
-        window.localStorage.setItem(key, value);
-      } catch {
-        /* quota / private mode */
-      }
-      return Promise.resolve();
-    }
-    return AsyncStorage.setItem(key, value);
-  },
-  removeItem: (key: string) => {
-    if (isBrowserLocalStorageAvailable()) {
-      try {
-        window.localStorage.removeItem(key);
-      } catch {
-        /* */
-      }
-      return Promise.resolve();
-    }
-    return AsyncStorage.removeItem(key);
-  },
-};
+const webAuthStorage = createBrowserAuthStorage();
+
+const authStorage = createProviderTokenStrippingStorage(
+  createSupabaseAuthStorage(
+    Platform.OS === 'web'
+      ? { kind: 'web', webStorage: webAuthStorage }
+      : {
+          kind: 'native',
+          secureStore: SecureStore,
+          // Existing releases stored Supabase sessions here. The secure adapter
+          // deletes this value only after a verified SecureStore round-trip.
+          legacyStorage: AsyncStorage,
+        },
+  ),
+);
+
+/**
+ * Verified sensitive-string storage shared by auth journals and deletion
+ * receipts. Callers must use distinct keys for each record type.
+ */
+export function getAccountOperationStorage() {
+  return authStorage;
+}
+
+export function getMainSupabaseAuthOptions() {
+  return {
+    flowType: 'pkce' as const,
+    storage: authStorage,
+    persistSession: true,
+    autoRefreshToken: true,
+    // Account callbacks are accepted by the dedicated allow-listed route.
+    detectSessionInUrl: false,
+  };
+}
 
 /**
  * Supabase Auth（匿名ログイン）＋ RLS でアクセス制御します。
@@ -86,12 +112,7 @@ export function getSupabaseClient(): SupabaseClient | null {
 
   try {
     singleton = createClient(url, anonKey, {
-      auth: {
-        storage: authStorage,
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: false,
-      },
+      auth: getMainSupabaseAuthOptions(),
     });
     singletonConfigurationKey = configurationKey;
     return singleton;

@@ -18,6 +18,12 @@ import type {
   PortableTrip,
   PortableTripItem,
 } from '../../types/account';
+import type { Trip, TripItem } from '../../types/travel';
+import {
+  assertActiveTripGraph,
+  tripItemToCloudPayload,
+  tripToCloudPayload,
+} from './tripMapper';
 
 export interface PersonalSnapshotInput {
   entries: Record<string, DayEntry>;
@@ -33,6 +39,30 @@ const isDeviceUri = (value: string) =>
 
 const portableString = (value: unknown) =>
   typeof value === 'string' && !isDeviceUri(value) ? value : undefined;
+
+const PERSONAL_MEDIA_OBJECT_KEY =
+  /^([A-Za-z0-9_-]+)\/(calendar|diary|stamp|trip)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\.jpg$/;
+
+// Signed URLs expire and can contain bearer-like query parameters. Only stable
+// object keys (plus built-in icon references) belong in portable payloads.
+const portableMediaString = (
+  value: unknown,
+  expectedDomain: 'calendar' | 'diary' | 'stamp' | 'trip'
+    | readonly ('calendar' | 'diary' | 'stamp' | 'trip')[],
+  expectedOwnerId?: string,
+) => {
+  if (typeof value !== 'string') return undefined;
+  if (value.startsWith('icon://')) return value;
+  const match = PERSONAL_MEDIA_OBJECT_KEY.exec(value);
+  const allowedDomains = typeof expectedDomain === 'string'
+    ? [expectedDomain]
+    : expectedDomain;
+  if (!match || !allowedDomains.includes(
+    match[2].toLowerCase() as 'calendar' | 'diary' | 'stamp' | 'trip',
+  )) return undefined;
+  if (expectedOwnerId !== undefined && match[1] !== expectedOwnerId) return undefined;
+  return value;
+};
 
 const addOptional = <T extends object, K extends string, V>(
   target: T,
@@ -71,7 +101,10 @@ function createPortableTimeSlot(slot: TimeSlot): PortableTimeSlot {
   return result;
 }
 
-export function createPortableCalendarEntry(entry: DayEntry): PortableCalendarEntry {
+export function createPortableCalendarEntry(
+  entry: DayEntry,
+  expectedOwnerId?: string,
+): PortableCalendarEntry {
   const result: PortableCalendarEntry = {
     date: entry.date,
     miniStamps: {
@@ -87,13 +120,19 @@ export function createPortableCalendarEntry(entry: DayEntry): PortableCalendarEn
   addOptional(result, 'startTime', entry.startTime);
   addOptional(result, 'endTime', entry.endTime);
   addOptional(result, 'notificationEnabled', entry.notificationEnabled);
-  addOptional(result, 'imageUri', portableString(entry.imageUri));
+  addOptional(result, 'imageUri', portableMediaString(
+    entry.imageUri,
+    ['calendar', 'stamp'],
+    expectedOwnerId,
+  ));
   addOptional(result, 'timeSlots', entry.timeSlots?.map(createPortableTimeSlot));
   addOptional(result, 'diary', entry.diary);
   addOptional(
     result,
     'diaryPhotos',
-    entry.diaryPhotos?.map(portableString).filter((uri): uri is string => uri !== undefined),
+    entry.diaryPhotos
+      ?.map((uri) => portableMediaString(uri, 'diary', expectedOwnerId))
+      .filter((uri): uri is string => uri !== undefined),
   );
   addOptional(result, 'diaryConfirmed', entry.diaryConfirmed);
   addOptional(result, 'dailyGoal', entry.dailyGoal);
@@ -113,7 +152,7 @@ function createPortableSpecialDate(date: SpecialDate): PortableSpecialDate {
   return result;
 }
 
-function createPortableStamp(stamp: Stamp): PortableStamp {
+function createPortableStamp(stamp: Stamp, expectedOwnerId?: string): PortableStamp {
   const result: PortableStamp = {
     id: stamp.id,
     text: stamp.text,
@@ -124,7 +163,11 @@ function createPortableStamp(stamp: Stamp): PortableStamp {
   addOptional(result, 'isMain', stamp.isMain);
   addOptional(result, 'isEnabled', stamp.isEnabled);
   addOptional(result, 'isImageStamp', stamp.isImageStamp);
-  addOptional(result, 'imageUri', portableString(stamp.imageUri));
+  addOptional(result, 'imageUri', portableMediaString(
+    stamp.imageUri,
+    'stamp',
+    expectedOwnerId,
+  ));
   return result;
 }
 
@@ -153,76 +196,49 @@ function createPortablePreferences(input: Record<string, unknown>): PortablePref
   return result;
 }
 
-const asRecord = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
+export class PersonalSnapshotQuarantineError extends Error {
+  readonly code = 'travel-snapshot-quarantined';
+  readonly retryable = false;
 
-function createPortableTrip(value: unknown): PortableTrip | null {
-  const trip = asRecord(value);
-  if (!trip) return null;
-  const required = [
-    'id', 'title', 'startDate', 'endDate', 'color', 'startIcon', 'endIcon', 'createdAt', 'updatedAt',
-  ] as const;
-  if (required.some((key) => typeof trip[key] !== 'string') || typeof trip.revision !== 'number') {
-    return null;
+  constructor(message: string, options?: ErrorOptions) {
+    super(`Travel snapshot quarantined: ${message}`, options);
+    this.name = 'PersonalSnapshotQuarantineError';
   }
-  const result: PortableTrip = {
-    id: trip.id as string,
-    title: trip.title as string,
-    startDate: trip.startDate as string,
-    endDate: trip.endDate as string,
-    color: trip.color as string,
-    startIcon: trip.startIcon as string,
-    endIcon: trip.endIcon as string,
-    createdAt: trip.createdAt as string,
-    updatedAt: trip.updatedAt as string,
-    revision: trip.revision,
-  };
-  addOptional(result, 'memo', portableString(trip.memo));
-  addOptional(result, 'deletedAt', portableString(trip.deletedAt));
-  return result;
 }
 
-function createPortableTripItem(value: unknown): PortableTripItem | null {
-  const item = asRecord(value);
-  if (!item) return null;
-  const required = ['id', 'tripId', 'type', 'localDate'] as const;
-  if (
-    required.some((key) => typeof item[key] !== 'string') ||
-    typeof item.allDay !== 'boolean' ||
-    typeof item.sortOrder !== 'number'
-  ) {
-    return null;
+function portableTravel(
+  tripsInput: readonly unknown[],
+  itemsInput: readonly unknown[],
+): { trips: PortableTrip[]; tripItems: PortableTripItem[] } {
+  try {
+    const trips = tripsInput.map((value) => tripToCloudPayload(value as Trip));
+    const tripItems = itemsInput.map((value) => tripItemToCloudPayload(value as TripItem));
+    assertActiveTripGraph(trips as Trip[], tripItems as TripItem[]);
+    return { trips, tripItems };
+  } catch (error) {
+    throw new PersonalSnapshotQuarantineError(
+      error instanceof Error ? error.message : 'invalid travel data',
+      { cause: error },
+    );
   }
-  const result: PortableTripItem = {
-    id: item.id as string,
-    tripId: item.tripId as string,
-    type: item.type as string,
-    localDate: item.localDate as string,
-    allDay: item.allDay,
-    sortOrder: item.sortOrder,
-  };
-  const stringKeys = [
-    'startsAtUtc', 'endsAtUtc', 'departureTimezone', 'arrivalTimezone', 'departure', 'arrival',
-    'place', 'reservationNumber', 'memo',
-  ] as const;
-  stringKeys.forEach((key) => addOptional(result, key, portableString(item[key])));
-  addOptional(result, 'url', portableString(item.url));
-  return result;
 }
 
-export function createPortableSnapshot(snapshot: PersonalSnapshotInput): PersonalSnapshot {
+export function createPortableSnapshot(
+  snapshot: PersonalSnapshotInput,
+  expectedOwnerId?: string,
+): PersonalSnapshot {
+  const travel = portableTravel(snapshot.trips, snapshot.tripItems);
   return {
     entries: Object.fromEntries(
-      Object.entries(snapshot.entries).map(([date, entry]) => [date, createPortableCalendarEntry(entry)]),
+      Object.entries(snapshot.entries).map(([date, entry]) => [
+        date,
+        createPortableCalendarEntry(entry, expectedOwnerId),
+      ]),
     ),
     specialDates: snapshot.specialDates.map(createPortableSpecialDate),
     preferences: createPortablePreferences(snapshot.preferences),
-    stamps: snapshot.stamps.map(createPortableStamp),
-    trips: snapshot.trips.map(createPortableTrip).filter((trip): trip is PortableTrip => trip !== null),
-    tripItems: snapshot.tripItems
-      .map(createPortableTripItem)
-      .filter((item): item is PortableTripItem => item !== null),
+    stamps: snapshot.stamps.map((stamp) => createPortableStamp(stamp, expectedOwnerId)),
+    trips: travel.trips,
+    tripItems: travel.tripItems,
   };
 }

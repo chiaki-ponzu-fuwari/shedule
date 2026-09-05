@@ -56,6 +56,7 @@ function validAppliedAcknowledgement(mutation: OutboxMutation): MutationAcknowle
     revision: 1,
     payload: mutation.payload,
     updatedAt: mutation.createdAt,
+    schemaVersion: mutation.schemaVersion,
   };
   return {
     mutationId: mutation.mutationId,
@@ -66,6 +67,7 @@ function validAppliedAcknowledgement(mutation: OutboxMutation): MutationAcknowle
     revision: 1,
     deleted: false,
     row,
+    schemaVersion: mutation.schemaVersion,
   };
 }
 
@@ -231,6 +233,7 @@ describe('remote-first personal cloud sync', () => {
           revision: 1,
           payload: { notes: 'secret' },
           updatedAt: '2026-09-05T00:00:00Z',
+          schemaVersion: 1,
         }],
         cursor: 'foreign-cursor',
       }),

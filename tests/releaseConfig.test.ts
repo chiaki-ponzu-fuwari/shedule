@@ -24,6 +24,7 @@ const APP_JSON_PATH = path.join(ROOT, 'app.json');
 const INFO_PLIST_PATH = path.join(ROOT, 'ios/app/Info.plist');
 const PRIVACY_MANIFEST_PATH = path.join(ROOT, 'ios/app/PrivacyInfo.xcprivacy');
 const PBXPROJ_PATH = path.join(ROOT, 'ios/app.xcodeproj/project.pbxproj');
+const ENTITLEMENTS_PATH = path.join(ROOT, 'ios/app/app.entitlements');
 const APP_ICON_PATH = path.join(ROOT, 'assets/images/icon.png');
 const NOTIFICATION_ICON_PATH = path.join(ROOT, 'assets/images/notification-icon.png');
 const IOS_APP_ICON_PATH = path.join(
@@ -31,6 +32,7 @@ const IOS_APP_ICON_PATH = path.join(
   'ios/app/Images.xcassets/AppIcon.appiconset/AppIcon-1024.png',
 );
 const VERIFIER_PATH = path.join(ROOT, 'scripts/verify-release-config.mjs');
+const VERIFY_WORKFLOW_PATH = path.join(ROOT, '.github/workflows/verify.yml');
 
 function readJson<T>(filePath: string): T {
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
@@ -67,11 +69,15 @@ function createVerifierFixture(): string {
     '.env.example',
     'ios/app/Info.plist',
     'ios/app/PrivacyInfo.xcprivacy',
+    'ios/app/en.lproj/InfoPlist.strings',
+    'ios/app/ja.lproj/InfoPlist.strings',
     'ios/app.xcodeproj/project.pbxproj',
     'ios/app/Images.xcassets/AppIcon.appiconset/AppIcon-1024.png',
     'ios/app/Images.xcassets/AppIcon.appiconset/Contents.json',
     'assets/images/icon.png',
     'assets/images/notification-icon.png',
+    'locales/en.json',
+    'locales/ja.json',
   ];
 
   for (const relativePath of fixtureFiles) {
@@ -92,7 +98,9 @@ describe('Recoto release identity', () => {
     expect(expo.scheme).toBe('recoto');
     expect(expo.ios.bundleIdentifier).toBe('com.herac.recoto');
     expect(expo.android.package).toBe('com.herac.recoto');
-    expect(expo.ios).not.toHaveProperty('usesAppleSignIn');
+    expect(expo.ios.usesAppleSignIn).toBe(true);
+    expect(expo.ios.infoPlist?.CFBundleAllowMixedLocalizations).toBe(true);
+    expect(expo.plugins).toContain('expo-apple-authentication');
   });
 
   test('configures distinct release and notification artwork plus a concrete photo purpose', () => {
@@ -106,7 +114,7 @@ describe('Recoto release identity', () => {
     expect(notifications?.icon).not.toBe(expo.icon);
     expect(imagePicker).toEqual({
       photosPermission:
-        '選択した予定・プロフィール画像をアプリ内に表示するため、写真へのアクセスを許可してください。',
+        '予定・日記・グループ・画像スタンプに、あなたが選んだ写真を表示するために使用します。',
       cameraPermission: false,
       microphonePermission: false,
     });
@@ -121,18 +129,27 @@ describe('Recoto release identity', () => {
 
     expect(info.CFBundleDisplayName).toBe('レコト');
     expect(info.CFBundleName).toBe('レコト');
+    expect(info.CFBundleAllowMixedLocalizations).toBe(true);
     expect(info.CFBundleURLTypes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ CFBundleURLSchemes: expect.arrayContaining(['recoto']) }),
       ]),
     );
     expect(info.NSPhotoLibraryUsageDescription).toBe(
-      '選択した予定・プロフィール画像をアプリ内に表示するため、写真へのアクセスを許可してください。',
+      '予定・日記・グループ・画像スタンプに、あなたが選んだ写真を表示するために使用します。',
     );
     expect(bundleIdentifiers).toEqual(['com.herac.recoto', 'com.herac.recoto']);
     expect(pbxproj).not.toContain('org.name.app');
     expect(pbxproj).toContain('Build configuration list for PBXNativeTarget "app"');
-    expect(pbxproj).not.toContain('com.apple.developer.applesignin');
+    expect(fs.existsSync(ENTITLEMENTS_PATH)).toBe(true);
+    const entitlements = readPlist(ENTITLEMENTS_PATH);
+    expect(entitlements['com.apple.developer.applesignin']).toEqual(['Default']);
+    expect(pbxproj.match(/CODE_SIGN_ENTITLEMENTS = app\/app\.entitlements;/g)).toHaveLength(2);
+    expect(pbxproj).toContain('SystemCapabilities');
+    expect(pbxproj).toContain('com.apple.SignInWithApple');
+    expect(pbxproj).toContain('InfoPlist.strings in Resources');
+    expect(pbxproj).toContain('app/en.lproj/InfoPlist.strings');
+    expect(pbxproj).toContain('app/ja.lproj/InfoPlist.strings');
   });
 
   test('contains no obsolete scheduleshare deep link outside the preserved token namespace', () => {
@@ -227,12 +244,13 @@ describe('app-owned privacy manifest', () => {
     expect(manifest.NSPrivacyTrackingDomains).toEqual([]);
     expect(collectedTypes).toEqual(
       [
+        'NSPrivacyCollectedDataTypeEmailAddress',
         'NSPrivacyCollectedDataTypeName',
         'NSPrivacyCollectedDataTypeOtherUserContent',
+        'NSPrivacyCollectedDataTypePhotosorVideos',
         'NSPrivacyCollectedDataTypeUserID',
       ].sort(),
     );
-    expect(collectedTypes).not.toContain('NSPrivacyCollectedDataTypePhotosorVideos');
     for (const entry of collectedData) {
       expect(entry.NSPrivacyCollectedDataTypeLinked).toBe(true);
       expect(entry.NSPrivacyCollectedDataTypeTracking).toBe(false);
@@ -272,11 +290,25 @@ describe('app-owned privacy manifest', () => {
 });
 
 describe('release configuration verifier', () => {
+  test('requires the real legal site URL in production CI', () => {
+    const workflow = fs.readFileSync(VERIFY_WORKFLOW_PATH, 'utf8');
+
+    expect(workflow).toContain('NODE_ENV: production');
+    expect(workflow).toContain(
+      'EXPO_PUBLIC_LEGAL_BASE_URL: ${{ secrets.EXPO_PUBLIC_LEGAL_BASE_URL }}',
+    );
+    expect(workflow).toContain('npm run verify:config');
+  });
+
   test('accepts the checked-in production configuration', () => {
     const result = spawnSync(process.execPath, [VERIFIER_PATH], {
       cwd: ROOT,
       encoding: 'utf8',
-      env: { ...process.env, NODE_ENV: 'production' },
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        EXPO_PUBLIC_LEGAL_BASE_URL: 'https://legal.recoto.app',
+      },
     });
 
     expect(result.status).toBe(0);
@@ -418,5 +450,32 @@ describe('release configuration verifier', () => {
     expect(result.status).not.toBe(0);
     expect(output).toContain('EXPO_PUBLIC_LEGAL_BASE_URL');
     expect(output).not.toContain(insecureUrl);
+  });
+
+  test('requires a real HTTPS legal site for production builds', () => {
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      NODE_ENV: 'production' as const,
+    };
+    delete environment['EXPO_PUBLIC_LEGAL_BASE_URL'];
+    const missing = spawnSync(process.execPath, [VERIFIER_PATH], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: environment,
+    });
+    expect(missing.status).not.toBe(0);
+    expect(`${missing.stdout}${missing.stderr}`).toContain('EXPO_PUBLIC_LEGAL_BASE_URL');
+
+    const placeholder = spawnSync(process.execPath, [VERIFIER_PATH], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        EXPO_PUBLIC_LEGAL_BASE_URL: 'https://YOUR_LEGAL_SITE_DOMAIN',
+      },
+    });
+    expect(placeholder.status).not.toBe(0);
+    expect(`${placeholder.stdout}${placeholder.stderr}`).toContain('EXPO_PUBLIC_LEGAL_BASE_URL');
   });
 });

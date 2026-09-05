@@ -112,6 +112,8 @@ export interface GroupSharingSettings {
 }
 
 export interface SharedEntry {
+  id: string;
+  groupId: string;
   userId: string;
   userName: string;
   userColor: string;
@@ -151,3 +153,14 @@ export interface DayInfo {
   isSaturday: boolean;
   specialDate?: SpecialDate;
 }
+
+export type {
+  Trip,
+  TripDraft,
+  TripDraftError,
+  TripItem,
+  TripItemDraft,
+  TripItemType,
+  TripTransportIcon,
+  TripWeekSegment,
+} from './travel';

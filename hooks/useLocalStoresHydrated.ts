@@ -5,6 +5,7 @@ import { useGoogleSyncStore } from '../store/googleSyncStore';
 import { useGroupStore } from '../store/groupStore';
 import { useLocaleStore } from '../store/localeStore';
 import { useStampStore } from '../store/stampStore';
+import { useTripStore } from '../store/tripStore';
 
 export interface PersistHydrationSource {
   persist: {
@@ -14,9 +15,10 @@ export interface PersistHydrationSource {
   };
 }
 
-const persistedLocalStores: readonly PersistHydrationSource[] = [
+export const persistedLocalStores: readonly PersistHydrationSource[] = [
   useCalendarStore,
   useStampStore,
+  useTripStore,
   useLocaleStore,
   useGroupStore,
   useGoogleAuthStore,

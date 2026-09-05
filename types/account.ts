@@ -21,6 +21,8 @@ export type CloudEntity =
   | 'trip'
   | 'trip-item';
 
+export const CURRENT_PERSONAL_SCHEMA_VERSION = 1 as const;
+
 export interface OutboxMutation {
   mutationId: string;
   ownerId: string;
@@ -32,6 +34,7 @@ export interface OutboxMutation {
   baseRevision: number | null;
   createdAt: string;
   attempts: number;
+  schemaVersion: number;
 }
 
 export interface PortableNoteItem {
@@ -134,6 +137,7 @@ export interface PortableTripItem {
   tripId: string;
   type: string;
   localDate: string;
+  arrivalLocalDate?: string;
   allDay: boolean;
   startsAtUtc?: string;
   endsAtUtc?: string;

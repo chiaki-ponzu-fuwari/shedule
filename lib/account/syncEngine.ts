@@ -1,6 +1,7 @@
 import type { OutboxMutation, SyncPhase } from '../../types/account';
 import {
   CloudRepositoryError,
+  requireCurrentPersonalSchemaVersion,
   type CloudRepository,
   type CloudRow,
   type CloudRowSeed,
@@ -132,6 +133,10 @@ function normalizeRow(seed: CloudRowSeed, ownerId: string): CloudRow {
     revision: seed.revision,
     payload: clonePayload(seed.payload),
     updatedAt: seed.updatedAt ?? seed.deletedAt ?? '1970-01-01T00:00:00.000Z',
+    schemaVersion: requireCurrentPersonalSchemaVersion(
+      seed.schemaVersion,
+      `Local row ${seed.id}`,
+    ),
     ...(seed.deletedAt ? { deletedAt: seed.deletedAt } : {}),
   };
 }
@@ -145,6 +150,9 @@ function assertRowsBelongToOwner(rows: readonly CloudRow[], ownerId: string): vo
       false,
     );
   }
+  rows.forEach((row) => {
+    requireCurrentPersonalSchemaVersion(row.schemaVersion, `Cloud row ${row.entity}:${row.id}`);
+  });
 }
 
 function jsonValuesEqual(a: unknown, b: unknown): boolean {
@@ -189,6 +197,7 @@ function assertDuplicateMutationIntegrity(mutations: readonly OutboxMutation[]):
 function rowsDiffer(a: CloudRow, b: CloudRow): boolean {
   return a.deletedAt !== b.deletedAt
     || a.revision !== b.revision
+    || a.schemaVersion !== b.schemaVersion
     || !jsonValuesEqual(a.payload, b.payload);
 }
 
@@ -203,6 +212,7 @@ function migrationMutation(ownerId: string, row: CloudRow): OutboxMutation {
     baseRevision: null,
     createdAt: row.updatedAt,
     attempts: 0,
+    schemaVersion: row.schemaVersion,
   };
 }
 
@@ -218,6 +228,7 @@ function rowsAreTheSameVersion(a: CloudRow, b: CloudRow): boolean {
     && a.entity === b.entity
     && a.id === b.id
     && a.revision === b.revision
+    && a.schemaVersion === b.schemaVersion
     && a.updatedAt === b.updatedAt
     && a.deletedAt === b.deletedAt
     && samePayload(a.payload, b.payload);
@@ -231,6 +242,14 @@ function assertAcknowledgement(
   mutation: OutboxMutation,
   acknowledgement: MutationAcknowledgement,
 ): void {
+  const acknowledgementSchemaVersion = requireCurrentPersonalSchemaVersion(
+    acknowledgement.schemaVersion ?? acknowledgement.row?.schemaVersion,
+    `Acknowledgement ${mutation.mutationId}`,
+  );
+  const mutationSchemaVersion = requireCurrentPersonalSchemaVersion(
+    mutation.schemaVersion,
+    `Mutation ${mutation.mutationId}`,
+  );
   if (acknowledgement.ownerId !== mutation.ownerId) {
     throw new CloudRepositoryError(
       'owner-scope-violation',
@@ -268,6 +287,16 @@ function assertAcknowledgement(
       `Acknowledgement row ${row.id} belongs to another owner.`,
       false,
     );
+  }
+  const rowSchemaVersion = requireCurrentPersonalSchemaVersion(
+    row.schemaVersion,
+    `Acknowledgement row ${row.id}`,
+  );
+  if (
+    acknowledgementSchemaVersion !== rowSchemaVersion
+    || (acknowledgement.status === 'applied' && rowSchemaVersion !== mutationSchemaVersion)
+  ) {
+    throw acknowledgementError(`Cloud acknowledgement ${mutation.mutationId} changed schema version.`);
   }
   if (row.entity !== mutation.entity || row.id !== mutation.entityId) {
     throw acknowledgementError(`Cloud acknowledgement ${mutation.mutationId} points at another row.`);
@@ -425,7 +454,9 @@ export function isAuthFailure(error: unknown): boolean {
 function desiredStateMatchesRemote(mutation: OutboxMutation, remoteRow: CloudRow | null): boolean {
   if (!remoteRow) return false;
   if (mutation.operation === 'delete') return Boolean(remoteRow.deletedAt);
-  return !remoteRow.deletedAt && samePayload(mutation.payload, remoteRow.payload);
+  return !remoteRow.deletedAt
+    && mutation.schemaVersion === remoteRow.schemaVersion
+    && samePayload(mutation.payload, remoteRow.payload);
 }
 
 function staleConflictReason(
@@ -578,6 +609,26 @@ export async function flushOutbox(
       syncPhase: 'pending',
       retryDelayMs: null,
     };
+  }
+
+  for (const mutation of activeMutations) {
+    try {
+      requireCurrentPersonalSchemaVersion(
+        mutation.schemaVersion,
+        `Mutation ${mutation.mutationId}`,
+      );
+    } catch (error) {
+      return persistFailure(
+        originalMutations,
+        settledMutationKeys,
+        acknowledgements,
+        discardedMutations,
+        conflictBackups,
+        mutation,
+        error,
+        options,
+      );
+    }
   }
 
   if (requiresFullPull(options.lastSyncedAt, options.now)) {

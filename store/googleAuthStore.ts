@@ -4,6 +4,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { useGoogleSyncStore } from './googleSyncStore';
+import {
+  createGoogleWebTokenStorage,
+  revokeGoogleAuthorization,
+} from '../lib/googleCalendarAuth';
 
 interface GoogleAuthState {
   isSignedIn: boolean;
@@ -19,25 +23,23 @@ interface GoogleAuthState {
 
 const SECURE_KEY_ACCESS = 'google_access_token';
 const SECURE_KEY_REFRESH = 'google_refresh_token';
+const WEB_TOKEN_PREFIX = '@scheduleshare/secure/';
 
 /** Web: トークンは localStorage より sessionStorage（タブを閉じたら消える・XSS で盗まれても永続しにくい） */
-const WEB_TOKEN_PREFIX = '@scheduleshare/secure/';
+const getWebTokenStorage = () => {
+  if (typeof sessionStorage === 'undefined' || typeof localStorage === 'undefined') {
+    throw new Error('Google token storage is unavailable');
+  }
+  return createGoogleWebTokenStorage({
+    session: sessionStorage,
+    legacy: localStorage,
+    prefix: WEB_TOKEN_PREFIX,
+  });
+};
 
 const secureSet = async (key: string, value: string) => {
   if (Platform.OS === 'web') {
-    try {
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(WEB_TOKEN_PREFIX + key, value);
-      }
-      // 旧実装（平文キー）を残さない
-      try {
-        localStorage.removeItem(key);
-      } catch {
-        /* */
-      }
-    } catch {
-      /* quota / private mode */
-    }
+    await getWebTokenStorage().setItem(key, value);
     return;
   }
   await SecureStore.setItemAsync(key, value);
@@ -45,37 +47,14 @@ const secureSet = async (key: string, value: string) => {
 
 const secureGet = async (key: string): Promise<string | null> => {
   if (Platform.OS === 'web') {
-    try {
-      if (typeof sessionStorage === 'undefined') return null;
-      const namespaced = WEB_TOKEN_PREFIX + key;
-      let v = sessionStorage.getItem(namespaced);
-      if (v) return v;
-      const legacy = localStorage.getItem(key);
-      if (legacy) {
-        sessionStorage.setItem(namespaced, legacy);
-        localStorage.removeItem(key);
-        return legacy;
-      }
-    } catch {
-      return null;
-    }
-    return null;
+    return getWebTokenStorage().getItem(key);
   }
   return SecureStore.getItemAsync(key);
 };
 
 const secureDel = async (key: string) => {
   if (Platform.OS === 'web') {
-    try {
-      sessionStorage?.removeItem(WEB_TOKEN_PREFIX + key);
-    } catch {
-      /* */
-    }
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      /* */
-    }
+    await getWebTokenStorage().removeItem(key);
     return;
   }
   await SecureStore.deleteItemAsync(key);
@@ -90,14 +69,41 @@ export const useGoogleAuthStore = create<GoogleAuthState>()(
       userPhoto: null,
 
       signIn: async (email, name, photo, accessToken, refreshToken) => {
-        await secureSet(SECURE_KEY_ACCESS, accessToken);
-        if (refreshToken) await secureSet(SECURE_KEY_REFRESH, refreshToken);
-        set({ isSignedIn: true, userEmail: email, userName: name, userPhoto: photo });
+        try {
+          await secureSet(SECURE_KEY_ACCESS, accessToken);
+          if (refreshToken) {
+            await secureSet(SECURE_KEY_REFRESH, refreshToken);
+          } else {
+            await secureDel(SECURE_KEY_REFRESH);
+          }
+          set({ isSignedIn: true, userEmail: email, userName: name, userPhoto: photo });
+        } catch {
+          await Promise.allSettled([
+            secureDel(SECURE_KEY_ACCESS),
+            secureDel(SECURE_KEY_REFRESH),
+          ]);
+          throw new Error('Google Calendar credentials could not be stored');
+        }
       },
 
       signOut: async () => {
-        await secureDel(SECURE_KEY_ACCESS);
-        await secureDel(SECURE_KEY_REFRESH);
+        let token: string | null = null;
+        try {
+          token = (await secureGet(SECURE_KEY_REFRESH)) ?? (await secureGet(SECURE_KEY_ACCESS));
+        } catch {
+          // Storage cleanup below still runs even when a browser blocks reads.
+        }
+        if (token) {
+          try {
+            await revokeGoogleAuthorization(token);
+          } catch {
+            // Disconnect locally even if Google is temporarily unreachable.
+          }
+        }
+        await Promise.allSettled([
+          secureDel(SECURE_KEY_ACCESS),
+          secureDel(SECURE_KEY_REFRESH),
+        ]);
         useGoogleSyncStore.getState().clearCalendarListSyncToken();
         set({ isSignedIn: false, userEmail: null, userName: null, userPhoto: null });
       },

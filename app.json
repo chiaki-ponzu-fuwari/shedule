@@ -17,9 +17,17 @@
       "android",
       "web"
     ],
+    "locales": {
+      "ja": "./locales/ja.json",
+      "en": "./locales/en.json"
+    },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.herac.recoto"
+      "bundleIdentifier": "com.herac.recoto",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true
+      }
     },
     "android": {
       "package": "com.herac.recoto",
@@ -42,12 +50,13 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "選択した予定・プロフィール画像をアプリ内に表示するため、写真へのアクセスを許可してください。",
+          "photosPermission": "予定・日記・グループ・画像スタンプに、あなたが選んだ写真を表示するために使用します。",
           "cameraPermission": false,
           "microphonePermission": false
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, Modal, TouchableOpacity, TouchableWithoutFeedback,
-  StyleSheet, Animated, Dimensions, Image,
+  StyleSheet, Animated, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Haptics } from '../../utils/haptics';
@@ -11,6 +11,7 @@ import { WheelPicker } from '../ui/WheelPicker';
 import { colors } from '../../constants/colors';
 import { formatFullDate, addDays, formatDate, parseDate } from '../../utils/dateUtils';
 import { useTranslation } from '../../constants/i18n';
+import { PersonalMediaImage } from '../common/PersonalMediaImage';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_H = SCREEN_H * 0.52;
@@ -167,7 +168,7 @@ export function DayViewSheet({ visible, date, onClose, onEdit, onDateChange }: P
                           <Ionicons name={entry.imageUri.replace('icon://', '') as any} size={28} color={colors.primary} />
                         </View>
                       ) : (
-                        <Image source={{ uri: entry.imageUri }} style={styles.imageThumb} />
+                        <PersonalMediaImage domain={['calendar', 'stamp']} uri={entry.imageUri} style={styles.imageThumb} />
                       )}
                     </View>
                   )}

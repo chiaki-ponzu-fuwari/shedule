@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions,
-  TextInput, Image, Alert, Modal,
+  TextInput, Alert, Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,7 @@ import { colors } from '../../constants/colors';
 import { useTranslation } from '../../constants/i18n';
 import { StampBadge } from '../ui/StampBadge';
 import { HorizontalDateStrip } from '../ui/HorizontalDateStrip';
+import { PersonalMediaImage } from '../common/PersonalMediaImage';
 
 const SCREEN_W = Dimensions.get('window').width;
 const COL_W = Math.floor((SCREEN_W - 40) / 7);
@@ -300,7 +301,7 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
               {(selectedEntry?.diaryPhotos ?? []).map((uri, i) => (
                 <View key={i} style={styles.photoSlot}>
                   <TouchableOpacity onPress={() => isConfirmed && setLightboxUri(uri)} activeOpacity={isConfirmed ? 0.7 : 1}>
-                    <Image source={{ uri }} style={styles.photoImg} />
+                    <PersonalMediaImage domain="diary" uri={uri} style={styles.photoImg} />
                   </TouchableOpacity>
                   {!isConfirmed && (
                     <TouchableOpacity style={styles.photoDelete} onPress={() => handleRemovePhoto(i)}>
@@ -327,7 +328,7 @@ export function WeeklyView({ currentDate, selectedDate, onDayPress, onWeekChange
       {/* 写真拡大ライトボックス */}
       <Modal visible={!!lightboxUri} transparent animationType="fade" onRequestClose={() => setLightboxUri(null)}>
         <TouchableOpacity style={styles.lightboxOverlay} activeOpacity={1} onPress={() => setLightboxUri(null)}>
-          {lightboxUri && <Image source={{ uri: lightboxUri }} style={styles.lightboxImage} resizeMode="contain" />}
+          {lightboxUri && <PersonalMediaImage domain="diary" uri={lightboxUri} style={styles.lightboxImage} resizeMode="contain" />}
         </TouchableOpacity>
       </Modal>
     </View>

@@ -1,4 +1,13 @@
-import type { CloudEntity, OutboxMutation } from '../../types/account';
+import {
+  CURRENT_PERSONAL_SCHEMA_VERSION,
+  type CloudEntity,
+  type OutboxMutation,
+} from '../../types/account';
+import {
+  assertTripItemWithinActiveParent,
+  tripFromCloudPayload,
+  tripItemFromCloudPayload,
+} from './tripMapper';
 
 export interface CloudRow {
   ownerId: string;
@@ -8,10 +17,11 @@ export interface CloudRow {
   payload: Record<string, unknown> | null;
   updatedAt: string;
   deletedAt?: string;
+  schemaVersion: number;
 }
 
 export type CloudRowSeed = Pick<CloudRow, 'id' | 'revision' | 'payload'> &
-  Partial<Pick<CloudRow, 'ownerId' | 'entity' | 'updatedAt' | 'deletedAt'>> & {
+  Partial<Pick<CloudRow, 'ownerId' | 'entity' | 'updatedAt' | 'deletedAt' | 'schemaVersion'>> & {
     /** Test-only seed ordering; consumers must treat returned cursors as opaque. */
     changeSequence?: number;
   };
@@ -32,6 +42,7 @@ export interface MutationAcknowledgement {
   revision: number | null;
   deleted: boolean;
   row: CloudRow | null;
+  schemaVersion: number | null;
 }
 
 export interface CloudVerificationExpectation {
@@ -75,6 +86,7 @@ export type CloudRepositoryErrorCode =
   | 'verification-failed'
   | 'owner-scope-violation'
   | 'outbox-corruption'
+  | 'unsupported-schema-version'
   | 'invalid-cursor'
   | 'repository-error';
 
@@ -114,6 +126,28 @@ interface StoredCloudRow {
 const DEFAULT_OWNER_ID = 'u1';
 const DEFAULT_ENTITY: CloudEntity = 'calendar-entry';
 const DEFAULT_TIMESTAMP = '1970-01-01T00:00:00.000Z';
+
+export function readPersonalSchemaVersion(value: unknown, label: string): number {
+  // Versionless durable rows predate schema tagging and are always v1. Keep
+  // this literal stable when CURRENT advances during a rolling deployment.
+  const version = value === undefined ? 1 : value;
+  if (!Number.isSafeInteger(version) || Number(version) < 1) {
+    throw new CloudRepositoryError('repository-error', `Invalid ${label} schema version.`, false);
+  }
+  return Number(version);
+}
+
+export function requireCurrentPersonalSchemaVersion(value: unknown, label: string): number {
+  const version = readPersonalSchemaVersion(value, label);
+  if (version !== CURRENT_PERSONAL_SCHEMA_VERSION) {
+    throw new CloudRepositoryError(
+      'unsupported-schema-version',
+      `${label} uses unsupported schema version ${version}.`,
+      false,
+    );
+  }
+  return version;
+}
 
 function rowKey(entity: CloudEntity, id: string): string {
   return `${entity}\u0000${id}`;
@@ -187,6 +221,7 @@ export class MemoryCloudRepository implements CloudRepository {
         revision: seed.revision,
         payload: seed.deletedAt ? null : clonePayload(seed.payload),
         updatedAt: seed.updatedAt ?? seed.deletedAt ?? DEFAULT_TIMESTAMP,
+        schemaVersion: readPersonalSchemaVersion(seed.schemaVersion, `Cloud row ${seed.id}`),
         ...(seed.deletedAt ? { deletedAt: seed.deletedAt } : {}),
       };
       this.ownerRows(ownerId).set(rowKey(entity, seed.id), { row, changeSequence });
@@ -238,6 +273,10 @@ export class MemoryCloudRepository implements CloudRepository {
       entityId: mutation.entityId,
     });
     this.assertAvailable();
+    const schemaVersion = requireCurrentPersonalSchemaVersion(
+      mutation.schemaVersion,
+      `Mutation ${mutation.mutationId}`,
+    );
 
     const ackKey = acknowledgementKey(mutation.ownerId, mutation.mutationId);
     const previousAcknowledgement = this.acknowledgements.get(ackKey);
@@ -266,6 +305,42 @@ export class MemoryCloudRepository implements CloudRepository {
       return cloneAcknowledgement(acknowledgement);
     }
 
+    if (mutation.operation === 'upsert') {
+      try {
+        if (mutation.entity === 'trip') {
+          const candidate = tripFromCloudPayload(mutation.entityId, mutation.payload);
+          for (const stored of ownerRows.values()) {
+            const child = stored.row;
+            if (
+              child.entity !== 'trip-item'
+              || child.deletedAt
+              || child.payload?.tripId !== mutation.entityId
+            ) continue;
+            assertTripItemWithinActiveParent(
+              tripItemFromCloudPayload(child.id, child.payload),
+              [candidate],
+            );
+          }
+        } else if (mutation.entity === 'trip-item') {
+          const candidate = tripItemFromCloudPayload(mutation.entityId, mutation.payload);
+          const parent = ownerRows.get(rowKey('trip', candidate.tripId))?.row;
+          if (!parent || parent.deletedAt || !parent.payload) {
+            throw new Error(`Trip item ${candidate.id} has no active parent`);
+          }
+          assertTripItemWithinActiveParent(
+            candidate,
+            [tripFromCloudPayload(parent.id, parent.payload)],
+          );
+        }
+      } catch (error) {
+        throw new CloudRepositoryError(
+          'repository-error',
+          error instanceof Error ? error.message : 'Invalid travel mutation.',
+          false,
+        );
+      }
+    }
+
     const revision = (this.maxRevisionByOwner.get(mutation.ownerId) ?? 0) + 1;
     const changeSequence = (this.changeSequenceByOwner.get(mutation.ownerId) ?? 0) + 1;
     const isDelete = mutation.operation === 'delete';
@@ -276,12 +351,40 @@ export class MemoryCloudRepository implements CloudRepository {
       revision,
       payload: isDelete ? null : clonePayload(mutation.payload),
       updatedAt: mutation.createdAt,
+      schemaVersion,
       ...(isDelete ? { deletedAt: mutation.createdAt } : {}),
     };
 
     ownerRows.set(key, { row, changeSequence });
     this.maxRevisionByOwner.set(mutation.ownerId, revision);
     this.changeSequenceByOwner.set(mutation.ownerId, changeSequence);
+
+    if (mutation.entity === 'trip' && isDelete) {
+      let cascadeRevision = revision;
+      let cascadeSequence = changeSequence;
+      for (const [childKey, stored] of ownerRows) {
+        const child = stored.row;
+        if (
+          child.entity !== 'trip-item'
+          || child.deletedAt
+          || child.payload?.tripId !== mutation.entityId
+        ) continue;
+        cascadeRevision += 1;
+        cascadeSequence += 1;
+        ownerRows.set(childKey, {
+          changeSequence: cascadeSequence,
+          row: {
+            ...cloneRow(child),
+            revision: cascadeRevision,
+            payload: null,
+            updatedAt: mutation.createdAt,
+            deletedAt: mutation.createdAt,
+          },
+        });
+      }
+      this.maxRevisionByOwner.set(mutation.ownerId, cascadeRevision);
+      this.changeSequenceByOwner.set(mutation.ownerId, cascadeSequence);
+    }
 
     const acknowledgement = this.createAcknowledgement(mutation, 'applied', row);
     this.acknowledgements.set(ackKey, cloneAcknowledgement(acknowledgement));
@@ -369,6 +472,7 @@ export class MemoryCloudRepository implements CloudRepository {
       revision: row?.revision ?? null,
       deleted: Boolean(row?.deletedAt),
       row: row ? cloneRow(row) : null,
+      schemaVersion: row?.schemaVersion ?? null,
     };
   }
 

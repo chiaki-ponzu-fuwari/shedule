@@ -38,6 +38,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="travel"
+        options={{
+          title: tx(locale, 'tab.travel'),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? 'airplane' : 'airplane-outline'} color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="groups"
         options={{
           title: tx(locale, 'tab.groups'),

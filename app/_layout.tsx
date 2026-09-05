@@ -1,25 +1,69 @@
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../constants/colors';
+import { useAccountBootstrap } from '../hooks/useAccountBootstrap';
+import { useAccountCloudSync } from '../hooks/useAccountCloudSync';
 import { useGoogleCalendarAutoSync } from '../hooks/useGoogleCalendarAutoSync';
 import { useLocalStoresHydration } from '../hooks/useLocalStoresHydrated';
 import { useSupabaseAuth } from '../hooks/useSupabaseAuth';
+import { useTranslation } from '../constants/i18n';
 
 export function HydratedApplication() {
+  const { t } = useTranslation();
   useSupabaseAuth();
+  const bootstrap = useAccountBootstrap();
+
+  if (bootstrap.status === 'ready' || bootstrap.status === 'safe-failure') {
+    return <BootstrappedApplication />;
+  }
+
+  if (bootstrap.status === 'blocked') {
+    return (
+      <View style={styles.recovery}>
+        <Text accessibilityLiveRegion="polite" style={styles.recoveryTitle}>
+          {t('app.bootstrap.blockedTitle')}
+        </Text>
+        <Text style={styles.recoveryBody}>{t('app.bootstrap.blockedBody')}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void bootstrap.retry()}
+          style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}
+        >
+          <Text style={styles.retryLabel}>{t('common.retry')}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.boot}>
+      <ActivityIndicator accessibilityLabel={t('app.loading')} color={colors.primary} />
+    </View>
+  );
+}
+
+export function BootstrappedApplication() {
   useGoogleCalendarAutoSync();
+  useAccountCloudSync();
+
+  return <ApplicationStack />;
+}
+
+export function ApplicationStack() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="join/[code]" />
+      <Stack.Screen name="auth/callback" />
     </Stack>
   );
 }
 
 export function HydrationGate() {
+  const { t } = useTranslation();
   const { status, retry } = useLocalStoresHydration();
 
   if (status === 'ready') {
@@ -29,16 +73,18 @@ export function HydrationGate() {
   if (status === 'failed') {
     return (
       <View style={styles.recovery}>
-        <Text style={styles.recoveryTitle}>保存したデータを読み込めませんでした</Text>
+        <Text accessibilityLiveRegion="polite" style={styles.recoveryTitle}>
+          {t('app.hydration.failedTitle')}
+        </Text>
         <Text style={styles.recoveryBody}>
-          端末内のデータは削除されていません。時間をおいて、もう一度お試しください。
+          {t('app.hydration.failedBody')}
         </Text>
         <Pressable
           accessibilityRole="button"
           onPress={retry}
           style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}
         >
-          <Text style={styles.retryLabel}>再試行</Text>
+          <Text style={styles.retryLabel}>{t('common.retry')}</Text>
         </Pressable>
       </View>
     );
@@ -46,16 +92,17 @@ export function HydrationGate() {
 
   return (
     <View style={styles.boot}>
-      <ActivityIndicator color={colors.primary} />
+      <ActivityIndicator accessibilityLabel={t('app.loading')} color={colors.primary} />
     </View>
   );
 }
 
 export default function RootLayout() {
+  const pathname = usePathname();
   return (
     <GestureHandlerRootView style={styles.root}>
       <StatusBar style="dark" backgroundColor="#FFF0F5" />
-      <HydrationGate />
+      {pathname === '/auth/callback' ? <ApplicationStack /> : <HydrationGate />}
     </GestureHandlerRootView>
   );
 }

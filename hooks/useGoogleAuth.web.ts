@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import { useGoogleAuthStore } from '../store/googleAuthStore';
+import { GOOGLE_CALENDAR_SCOPES } from '../lib/googleCalendarAuth';
 import { Alert, Platform } from 'react-native';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -29,12 +30,7 @@ export function useGoogleAuth() {
       clientId,
       responseType: AuthSession.ResponseType.Token,
       usePKCE: false,
-      scopes: [
-        'openid',
-        'profile',
-        'email',
-        'https://www.googleapis.com/auth/calendar',
-      ],
+      scopes: [...GOOGLE_CALENDAR_SCOPES],
       redirectUri,
       extraParams: {
         prompt: 'consent',

@@ -3,8 +3,9 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSupabaseClient, requireSupabaseClient } from '../lib/supabase';
 import { devError } from '../utils/devLog';
-import { Group, GroupMember, GroupSharingSettings, SharedEntry, SyncEntryData } from '../types';
+import { Group, GroupMember, GroupSharingSettings, SharedEntry, SyncEntryData, TimeSlot } from '../types';
 import { useAppSessionStore } from './appSessionStore';
+import { assertSharedPayloadAllowed } from '../lib/moderation/contentFilter';
 
 const MEMBER_COLORS = ['#FF6B9D', '#A78BFA', '#34D399', '#60A5FA', '#FBBF24', '#FB923C'];
 
@@ -24,6 +25,8 @@ function sharedEntryFetchDateBounds(): { min: string; max: string } {
 /** 短時間に fetchGroups が重複起動しないよう間引く（手動更新は force で必ず実行） */
 let lastFetchGroupsAt = 0;
 const FETCH_GROUPS_COOLDOWN_MS = 30_000;
+const SHARED_TIME_SLOT_LIMIT = 96;
+const SHARED_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 function randomColor(): string {
   return MEMBER_COLORS[Math.floor(Math.random() * MEMBER_COLORS.length)];
@@ -50,6 +53,75 @@ function markGroupCloudOnline() {
   useAppSessionStore.getState().setCloudOnline?.();
 }
 
+function safeSharedUrl(value: unknown): string | undefined | null {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string' || value.length > 2_048) return null;
+  try {
+    const parsed = new URL(value);
+    if (
+      (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')
+      || parsed.username
+      || parsed.password
+    ) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+/** Treat shared rows as untrusted even when they came through RLS. */
+export function parseSharedTimeSlots(value: unknown): TimeSlot[] | undefined {
+  let decoded = value;
+  if (typeof value === 'string') {
+    if (!value || value.length > 65_536) return undefined;
+    try {
+      decoded = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!Array.isArray(decoded) || decoded.length > SHARED_TIME_SLOT_LIMIT) return undefined;
+
+  const result: TimeSlot[] = [];
+  for (const candidate of decoded) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
+    const slot = candidate as Record<string, unknown>;
+    if (
+      typeof slot.id !== 'string'
+      || slot.id.length < 1
+      || slot.id.length > 200
+      || typeof slot.startTime !== 'string'
+      || !SHARED_TIME_PATTERN.test(slot.startTime)
+      || typeof slot.endTime !== 'string'
+      || !SHARED_TIME_PATTERN.test(slot.endTime)
+      || typeof slot.title !== 'string'
+      || slot.title.length > 500
+      || typeof slot.color !== 'string'
+      || slot.color.length < 1
+      || slot.color.length > 32
+      || (slot.notificationEnabled !== undefined && typeof slot.notificationEnabled !== 'boolean')
+      || (slot.reflectToMonthly !== undefined && typeof slot.reflectToMonthly !== 'boolean')
+    ) return undefined;
+    const url = safeSharedUrl(slot.url);
+    if (url === null) return undefined;
+    result.push({
+      id: slot.id,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      title: slot.title,
+      color: slot.color,
+      ...(url ? { url } : {}),
+      ...(typeof slot.notificationEnabled === 'boolean'
+        ? { notificationEnabled: slot.notificationEnabled }
+        : {}),
+      ...(typeof slot.reflectToMonthly === 'boolean'
+        ? { reflectToMonthly: slot.reflectToMonthly }
+        : {}),
+    });
+  }
+  return result;
+}
+
 function buildSharedEntryRow(
   groupId: string,
   myUserId: string,
@@ -57,6 +129,7 @@ function buildSharedEntryRow(
   myColor: string,
   e: SyncEntryData
 ) {
+  const timeSlots = parseSharedTimeSlots(e.timeSlots);
   return {
     group_id: groupId,
     user_id: myUserId,
@@ -71,7 +144,28 @@ function buildSharedEntryRow(
     mini_right_text: e.miniRightText ?? null,
     mini_right_bg: e.miniRightBg ?? null,
     notes: e.notes ?? null,
-    time_slots: e.timeSlots && e.timeSlots.length > 0 ? JSON.stringify(e.timeSlots) : null,
+    time_slots: timeSlots && timeSlots.length > 0 ? JSON.stringify(timeSlots) : null,
+  };
+}
+
+export function mapSharedEntryRow(row: any): SharedEntry {
+  const timeSlots = parseSharedTimeSlots(row.time_slots);
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    userId: row.user_id,
+    userName: row.user_name,
+    userColor: row.user_color,
+    date: row.date,
+    mainStampText: row.main_stamp_text ?? undefined,
+    mainStampBg: row.main_stamp_bg ?? undefined,
+    mainStampTextColor: row.main_stamp_text_color ?? undefined,
+    miniLeftText: row.mini_left_text ?? undefined,
+    miniLeftBg: row.mini_left_bg ?? undefined,
+    miniRightText: row.mini_right_text ?? undefined,
+    miniRightBg: row.mini_right_bg ?? undefined,
+    notes: row.notes ?? undefined,
+    timeSlots,
   };
 }
 
@@ -253,7 +347,16 @@ export const useGroupStore = create<GroupState>()(
       setAuthUserId: (userId) =>
         set((state) => {
           const id = userId ?? '';
-          if (state.myUserId === id) return state;
+          const hasSharedCache =
+            state.groups.length > 0
+            || Object.keys(state.sharingSettings).length > 0
+            || Object.keys(state.sharedEntries).length > 0
+            || Object.keys(state.groupIconUris).length > 0;
+          if (
+            state.myUserId === id
+            && state.cachedUserId === id
+            && (id !== '' || !hasSharedCache)
+          ) return state;
           const generationState = {
             authGeneration: state.authGeneration + 1,
             dataMutationGeneration: state.dataMutationGeneration + 1,
@@ -262,9 +365,23 @@ export const useGroupStore = create<GroupState>()(
             loading: false,
           };
           if (!id) {
-            return { ...generationState, myUserId: '' };
+            return {
+              ...generationState,
+              myUserId: '',
+              cachedUserId: '',
+              myName: 'わたし',
+              groups: [],
+              sharingSettings: {},
+              sharedEntries: {},
+              groupIconUris: {},
+            };
           }
-          if (state.cachedUserId && state.cachedUserId !== id) {
+          const switchingActiveOwner = Boolean(state.myUserId && state.myUserId !== id);
+          const cacheBelongsToAnotherOwner = Boolean(
+            state.cachedUserId && state.cachedUserId !== id
+          );
+          const unownedSensitiveCache = !state.cachedUserId && hasSharedCache;
+          if (switchingActiveOwner || cacheBelongsToAnotherOwner || unownedSensitiveCache) {
             return {
               ...generationState,
               myUserId: id,
@@ -291,6 +408,7 @@ export const useGroupStore = create<GroupState>()(
         })),
 
       createGroup: async (name, color, emoji) => {
+        assertSharedPayloadAllowed({ groupName: name, userName: get().myName });
         set((state) => ({
           dataMutationGeneration: state.dataMutationGeneration + 1,
           loading: false,
@@ -344,6 +462,7 @@ export const useGroupStore = create<GroupState>()(
       },
 
       joinGroupByCode: async (inviteCode) => {
+        assertSharedPayloadAllowed({ userName: get().myName });
         set((state) => ({
           dataMutationGeneration: state.dataMutationGeneration + 1,
           loading: false,
@@ -519,49 +638,18 @@ export const useGroupStore = create<GroupState>()(
           loading: false,
         }));
         const { client, owner } = await captureGroupOperation(get);
-        const myUserId = owner.userId;
-
-        // 先に自分の共有行を消す（FK や RLS で group_members だけ消せないことがある）
-        const { error: seErr } = await client
-          .from('shared_entries')
-          .delete()
-          .eq('group_id', groupId)
-          .eq('user_id', myUserId);
+        const { error } = await client.rpc('leave_group', { p_group_id: groupId });
         assertOperationOwner(get, owner);
-        if (seErr) {
-          devError('deleteGroup shared_entries', seErr.message);
-          throw recoverableGroupCloudError('グループ共有データの削除', seErr.message);
-        }
-
-        const { error: gmErr } = await client
-          .from('group_members')
-          .delete()
-          .eq('group_id', groupId)
-          .eq('user_id', myUserId);
-        assertOperationOwner(get, owner);
-        if (gmErr) {
-          devError('deleteGroup group_members', gmErr.message);
-          throw recoverableGroupCloudError('グループからの退出', gmErr.message);
-        }
-
-        const { data: remaining, error: remErr } = await client
-          .from('group_members')
-          .select('id')
-          .eq('group_id', groupId);
-        assertOperationOwner(get, owner);
-        if (remErr) {
-          devError('deleteGroup count members', remErr.message);
-        } else if (!remaining || remaining.length === 0) {
-          const { error: gErr } = await client.from('groups').delete().eq('id', groupId);
-          assertOperationOwner(get, owner);
-          if (gErr) devError('deleteGroup groups', gErr.message);
+        if (error) {
+          devError('deleteGroup leave_group', error.message);
+          throw recoverableGroupCloudError('グループからの退出', error.message);
         }
 
         set((state) => {
           if (!operationOwnerIsCurrent(state, owner)) return state;
           return {
             groups: state.groups.filter((g) => g.id !== groupId),
-            cachedUserId: myUserId,
+            cachedUserId: owner.userId,
             sharedEntries: { ...state.sharedEntries, [groupId]: [] },
             dataMutationGeneration: state.dataMutationGeneration + 1,
           };
@@ -571,6 +659,11 @@ export const useGroupStore = create<GroupState>()(
       },
 
       updateSharedMemo: (groupId, memo) => {
+        try {
+          assertSharedPayloadAllowed({ sharedMemo: memo });
+        } catch (error) {
+          return Promise.reject(error);
+        }
         const requestedOwner: GroupOperationOwner = {
           userId: get().myUserId,
           authGeneration: get().authGeneration,
@@ -592,18 +685,15 @@ export const useGroupStore = create<GroupState>()(
           }
 
           const { data: updated, error } = await client
-            .from('groups')
-            .update({ shared_memo: memo })
-            .eq('id', groupId)
-            .select('id,shared_memo')
-            .maybeSingle();
+            .rpc('update_group_memo', { p_group_id: groupId, p_memo: memo })
+            .single();
           assertOperationOwner(get, owner);
           if (error || !updated) {
             const detail = error?.message ?? '更新対象を確認できませんでした';
             devError('updateSharedMemo', detail);
             throw recoverableGroupCloudError('共有メモの更新', detail);
           }
-          const confirmedMemo = updated.shared_memo ?? '';
+          const confirmedMemo = (updated as { shared_memo?: string | null }).shared_memo ?? '';
           set((state) => {
             if (!operationOwnerIsCurrent(state, owner)) return state;
             return {
@@ -621,6 +711,11 @@ export const useGroupStore = create<GroupState>()(
       updateGroupName: (groupId, name) => {
         const trimmed = name.trim();
         if (!trimmed) return Promise.resolve();
+        try {
+          assertSharedPayloadAllowed({ groupName: trimmed });
+        } catch (error) {
+          return Promise.reject(error);
+        }
         const requestedOwner: GroupOperationOwner = {
           userId: get().myUserId,
           authGeneration: get().authGeneration,
@@ -641,18 +736,15 @@ export const useGroupStore = create<GroupState>()(
             throw new StaleGroupOperationError();
           }
           const { data: updated, error } = await client
-            .from('groups')
-            .update({ name: trimmed })
-            .eq('id', groupId)
-            .select('id,name')
-            .maybeSingle();
+            .rpc('rename_group', { p_group_id: groupId, p_name: trimmed })
+            .single();
           assertOperationOwner(get, owner);
           if (error || !updated) {
             const detail = error?.message ?? '更新対象を確認できませんでした';
             devError('updateGroupName', detail);
             throw recoverableGroupCloudError('グループ名の更新', detail);
           }
-          const confirmedName = updated.name;
+          const confirmedName = (updated as { name: string }).name;
           set((state) => {
             if (!operationOwnerIsCurrent(state, owner)) return state;
             return {
@@ -668,6 +760,7 @@ export const useGroupStore = create<GroupState>()(
       },
 
       syncMySchedule: async (groupId, entries) => {
+        assertSharedPayloadAllowed(entries);
         const { client, owner } = await captureGroupOperation(get);
         const myUserId = owner.userId;
         const { myName, groups } = get();
@@ -825,21 +918,7 @@ export const useGroupStore = create<GroupState>()(
           throw recoverableGroupCloudError('共有予定の取得', error.message);
         }
 
-        const entries: SharedEntry[] = (data ?? []).map((row: any) => ({
-          userId: row.user_id,
-          userName: row.user_name,
-          userColor: row.user_color,
-          date: row.date,
-          mainStampText: row.main_stamp_text ?? undefined,
-          mainStampBg: row.main_stamp_bg ?? undefined,
-          mainStampTextColor: row.main_stamp_text_color ?? undefined,
-          miniLeftText: row.mini_left_text ?? undefined,
-          miniLeftBg: row.mini_left_bg ?? undefined,
-          miniRightText: row.mini_right_text ?? undefined,
-          miniRightBg: row.mini_right_bg ?? undefined,
-          notes: row.notes ?? undefined,
-          timeSlots: row.time_slots ? (() => { try { return JSON.parse(row.time_slots); } catch { return undefined; } })() : undefined,
-        }));
+        const entries: SharedEntry[] = (data ?? []).map(mapSharedEntryRow);
 
         set((state) => {
           if (

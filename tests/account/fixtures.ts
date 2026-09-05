@@ -1,4 +1,8 @@
-import type { OutboxMutation, PersonalSnapshot } from '../../types/account';
+import {
+  CURRENT_PERSONAL_SCHEMA_VERSION,
+  type OutboxMutation,
+  type PersonalSnapshot,
+} from '../../types/account';
 
 export const emptyPersonalSnapshot = (): PersonalSnapshot => ({
   entries: {},
@@ -37,5 +41,6 @@ export const mutationFixture = (
   baseRevision: null,
   createdAt: '2026-09-05T00:00:00Z',
   attempts: 0,
+  schemaVersion: CURRENT_PERSONAL_SCHEMA_VERSION,
   ...overrides,
 });

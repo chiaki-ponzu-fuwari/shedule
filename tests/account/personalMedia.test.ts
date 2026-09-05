@@ -2,6 +2,7 @@ import {
   MAX_PERSONAL_MEDIA_BYTES,
   SIGNED_MEDIA_TTL_SECONDS,
   createBrowserMediaStaging,
+  createIndexedDbMediaDatabase,
   createPlatformJpegProcessor,
   createPersonalMediaService,
   createSupabasePersonalMediaStorage,
@@ -21,9 +22,10 @@ function fixture() {
     reencodeAsJpeg: jest.fn(async () => processedImage),
   };
   const staging = {
-    write: jest.fn(async (id: string) => `file:///documents/recoto-media/${id}.jpg`),
+    write: jest.fn(async (id: string) => `file:///documents/recoto-media-outbox/${id}.jpg`),
     read: jest.fn(async () => processedImage.bytes),
     remove: jest.fn(async () => undefined),
+    exists: jest.fn(async () => true),
   };
   const storage = {
     uploadIfAbsent: jest.fn<
@@ -101,7 +103,7 @@ describe('personal media', () => {
       ownerId: 'user-1',
       domain: 'calendar',
       objectKey: `user-1/calendar/${MEDIA_UUID}.jpg`,
-      stagedUri: `file:///documents/recoto-media/${MEDIA_UUID}.jpg`,
+      stagedUri: `file:///documents/recoto-media-outbox/${MEDIA_UUID}.jpg`,
       attempts: 0,
     });
     expect(f.persistPending).toHaveBeenCalledWith(pending);
@@ -156,7 +158,7 @@ describe('personal media', () => {
     await expect(prepare(f)).rejects.toThrow('response lost after outbox commit');
     expect(remotelyCommitted).toBe(true);
     expect(f.cleanupQueue.enqueueStagedFile).toHaveBeenCalledWith(
-      `file:///documents/recoto-media/${MEDIA_UUID}.jpg`,
+      `file:///documents/recoto-media-outbox/${MEDIA_UUID}.jpg`,
       MEDIA_UUID,
     );
     expect(f.staging.remove).not.toHaveBeenCalled();
@@ -236,6 +238,7 @@ describe('personal media', () => {
     })).rejects.toThrow('database offline');
 
     expect(f.cleanupQueue.enqueue).toHaveBeenCalledWith(pending.objectKey);
+    expect(f.cleanupQueue.enqueue).toHaveBeenCalledTimes(1);
     expect(discardPending).toHaveBeenCalledWith(pending.mutationId);
     expect(f.staging.remove).toHaveBeenCalledWith(pending.stagedUri);
     expect(f.operations).toEqual([
@@ -357,6 +360,13 @@ describe('personal media', () => {
     await expect(staging.read(uri)).resolves.toEqual(processedImage.bytes);
     await staging.remove(uri);
     await expect(staging.read(uri)).rejects.toThrow(/no longer available/i);
+  });
+
+  test('defers unavailable IndexedDB failure until media is actually staged', async () => {
+    const database = createIndexedDbMediaDatabase(undefined);
+
+    await expect(database.put(MEDIA_UUID, processedImage.bytes))
+      .rejects.toThrow(/durable browser storage/i);
   });
 
   test('reads the re-encoded JPEG with fetch on web instead of Expo FileSystem', async () => {

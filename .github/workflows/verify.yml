@@ -1,0 +1,40 @@
+name: Verify
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run check:legal
+      - name: Verify production legal configuration
+        if: github.event_name != 'pull_request'
+        env:
+          NODE_ENV: production
+          EXPO_PUBLIC_LEGAL_BASE_URL: ${{ secrets.EXPO_PUBLIC_LEGAL_BASE_URL }}
+        run: npm run verify:config
+
+  edge-functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check supabase/functions/*/index.ts

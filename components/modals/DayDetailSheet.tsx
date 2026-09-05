@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, Modal, TouchableOpacity, TouchableWithoutFeedback,
   StyleSheet, Animated, Dimensions, TextInput,
-  Image, ScrollView, Platform, Alert, Keyboard,
+  ScrollView, Platform, Alert, Keyboard,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,7 @@ import { NoteItem, Stamp } from '../../types';
 import { formatFullDate, addDays, formatDate, parseDate } from '../../utils/dateUtils';
 import { requestNotificationPermission, scheduleNotification, cancelNotification } from '../../utils/notifications';
 import { useTranslation } from '../../constants/i18n';
+import { PersonalMediaImage } from '../common/PersonalMediaImage';
 
 const PICKER_YEARS = Array.from({ length: 21 }, (_, i) => 2020 + i);
 const PICKER_MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -340,7 +341,7 @@ export function DayDetailSheet({ visible, date, onClose, onOpenAddStamp, onOpenE
                                 {isIcon ? (
                                   <Ionicons name={iconName as any} size={28} color={stamp.textColor} />
                                 ) : (
-                                  <Image source={{ uri: stamp.imageUri }} style={{ width: '100%', height: '100%', borderRadius: 12 }} />
+                                  <PersonalMediaImage domain="stamp" uri={stamp.imageUri} style={{ width: '100%', height: '100%', borderRadius: 12 }} />
                                 )}
                               </View>
                             </TouchableOpacity>

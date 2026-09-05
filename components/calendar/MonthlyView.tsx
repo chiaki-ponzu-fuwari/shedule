@@ -13,6 +13,8 @@ import { getMonthDays, getMonthLabel, addMonths, getWeekdayLabels } from '../../
 import { colors } from '../../constants/colors';
 import { useTranslation } from '../../constants/i18n';
 import { DayEntry } from '../../types';
+import { useTripStore } from '../../store/tripStore';
+import { TripWeekOverlay } from './TripWeekOverlay';
 
 interface Props {
   currentMonth: Date;
@@ -34,6 +36,7 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
   const recurringSchedules = useCalendarStore((s) => s.recurringSchedules);
   const weekStartDay = useCalendarStore((s) => s.weekStartDay);
   const getStamp = useStampStore((s) => s.getStamp);
+  const trips = useTripStore((s) => s.trips);
 
   const getDisplayStampId = (entry: DayEntry | undefined, position: 'main' | 'mini-left' | 'mini-right') => {
     if (position === 'main') return entry?.mainStampId;
@@ -44,6 +47,8 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const days = getMonthDays(year, month, specialDates, weekStartDay);
+  const weeks = Array.from({ length: Math.ceil(days.length / 7) }, (_, index) =>
+    days.slice(index * 7, index * 7 + 7));
   const weekdays = getWeekdayLabels(weekStartDay, locale);
 
   // 左右スワイプで月移動
@@ -128,27 +133,37 @@ export function MonthlyView({ currentMonth, selectedDate, onDayPress, onMonthCha
             if (w > 0) setGridWidth(w);
           }}
         >
-          {days.map((day) => {
-            const entry = entries[day.dateString];
-            const mainId = getDisplayStampId(entry, 'main');
-            const leftId = getDisplayStampId(entry, 'mini-left');
-            const rightId = getDisplayStampId(entry, 'mini-right');
-            return (
-              <DayCell
-                key={day.dateString}
-                day={day}
-                entry={entry}
-                mainStamp={mainId ? getStamp(mainId) : undefined}
-                leftMiniStamp={leftId ? getStamp(leftId) : undefined}
-                rightMiniStamp={rightId ? getStamp(rightId) : undefined}
-                onPress={() => onDayPress(day.dateString)}
-                isSelected={selectedDate === day.dateString}
-                imageUri={entry?.imageUri}
-                hasNotes={!!(entry?.notes || (entry?.noteItems && entry.noteItems.length > 0))}
-                cellWidth={cellWidth}
+          {weeks.map((week) => (
+            <View key={week[0].dateString} style={styles.weekRow}>
+              {week.map((day) => {
+                const entry = entries[day.dateString];
+                const mainId = getDisplayStampId(entry, 'main');
+                const leftId = getDisplayStampId(entry, 'mini-left');
+                const rightId = getDisplayStampId(entry, 'mini-right');
+                return (
+                  <DayCell
+                    key={day.dateString}
+                    day={day}
+                    entry={entry}
+                    mainStamp={mainId ? getStamp(mainId) : undefined}
+                    leftMiniStamp={leftId ? getStamp(leftId) : undefined}
+                    rightMiniStamp={rightId ? getStamp(rightId) : undefined}
+                    onPress={() => onDayPress(day.dateString)}
+                    isSelected={selectedDate === day.dateString}
+                    imageUri={entry?.imageUri}
+                    hasNotes={!!(entry?.notes || (entry?.noteItems && entry.noteItems.length > 0))}
+                    cellWidth={cellWidth}
+                  />
+                );
+              })}
+              <TripWeekOverlay
+                trips={trips}
+                weekStart={week[0].dateString}
+                weekEnd={week[week.length - 1].dateString}
+                width={widthForCells}
               />
-            );
-          })}
+            </View>
+          ))}
         </View>
       </ScrollView>
     </View>
@@ -203,10 +218,13 @@ const styles = StyleSheet.create({
   },
   // グリッド
   grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     width: '100%',
     backgroundColor: '#F0EBF8',
     paddingVertical: 1,
+  },
+  weekRow: {
+    width: '100%',
+    flexDirection: 'row',
+    position: 'relative',
   },
 });
