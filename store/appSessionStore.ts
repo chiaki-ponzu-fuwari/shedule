@@ -19,6 +19,8 @@ interface AppSessionState {
 }
 
 let guestSessionInFlight: Promise<string> | null = null;
+let authGeneration = 0;
+let observedIdentityGeneration = 0;
 
 const CLOUD_CONNECTION_ERROR =
   'クラウドに接続できませんでした。' +
@@ -28,6 +30,13 @@ function connectionError(detail?: string) {
   return new Error(detail ? `${CLOUD_CONNECTION_ERROR} (${detail})` : CLOUD_CONNECTION_ERROR);
 }
 
+class AuthSessionChangedError extends Error {
+  constructor() {
+    super('認証状態が変更されたため、開始中の処理を中止しました。');
+    this.name = 'AuthSessionChangedError';
+  }
+}
+
 export const useAppSessionStore = create<AppSessionState>((set, get) => ({
   identityMode: 'hydrating',
   cloudAvailability: 'unknown',
@@ -35,6 +44,8 @@ export const useAppSessionStore = create<AppSessionState>((set, get) => ({
   error: null,
 
   setObservedSession: (configured, user) => {
+    authGeneration += 1;
+    if (user?.id) observedIdentityGeneration = authGeneration;
     const next = decideInitialSession({ configured, user });
     useGroupStore.getState().setAuthUserId(next.userId);
     set({ ...next, error: null });
@@ -61,6 +72,8 @@ export const useAppSessionStore = create<AppSessionState>((set, get) => ({
 
     if (guestSessionInFlight) return guestSessionInFlight;
 
+    const startedAtGeneration = authGeneration;
+    const startedAtIdentityGeneration = observedIdentityGeneration;
     const request = (async () => {
       let client;
       try {
@@ -79,11 +92,27 @@ export const useAppSessionStore = create<AppSessionState>((set, get) => ({
 
       try {
         const { data: restored, error: restoreError } = await client.auth.getSession();
+        if (
+          authGeneration !== startedAtGeneration &&
+          observedIdentityGeneration !== startedAtIdentityGeneration
+        ) {
+          const observedUserId = get().userId;
+          if (observedUserId) return observedUserId;
+          throw new AuthSessionChangedError();
+        }
         if (restoreError) throw connectionError(restoreError.message);
 
         let user = restored.session?.user as SessionUser | undefined;
         if (!user) {
           const { data, error } = await client.auth.signInAnonymously();
+          if (
+            authGeneration !== startedAtGeneration &&
+            observedIdentityGeneration !== startedAtIdentityGeneration
+          ) {
+            const observedUserId = get().userId;
+            if (observedUserId) return observedUserId;
+            throw new AuthSessionChangedError();
+          }
           if (error) throw connectionError(error.message);
           user = (data.session?.user ?? data.user) as SessionUser | undefined;
         }
@@ -95,6 +124,7 @@ export const useAppSessionStore = create<AppSessionState>((set, get) => ({
         set({ ...next, error: null });
         return user.id;
       } catch (error) {
+        if (error instanceof AuthSessionChangedError) throw error;
         const recoverable =
           error instanceof Error && error.message.startsWith(CLOUD_CONNECTION_ERROR)
             ? error

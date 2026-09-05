@@ -374,10 +374,15 @@ describe('group cloud entry points', () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const ensureGuestSession = jest.fn(async () => 'group-user');
     const setCloudError = jest.fn();
-    const updateEq = jest.fn(async () => ({ error: { message: 'permission denied' } }));
+    const maybeSingle = jest.fn(async () => ({
+      data: null,
+      error: { message: 'permission denied' },
+    }));
     const client = {
       from: jest.fn(() => ({
-        update: jest.fn(() => ({ eq: updateEq })),
+        update: jest.fn(() => ({
+          eq: jest.fn(() => ({ select: jest.fn(() => ({ maybeSingle })) })),
+        })),
       })),
     };
 
@@ -408,12 +413,14 @@ describe('group cloud entry points', () => {
 
 describe('local persistence hydration', () => {
   afterEach(() => {
+    jest.useRealTimers();
     jest.restoreAllMocks();
     jest.resetModules();
   });
 
-  test('falls back to local defaults instead of blocking forever when storage reads fail', async () => {
+  test('reports a storage failure without exposing unhydrated local defaults', async () => {
     const onReady = jest.fn();
+    const onFailure = jest.fn();
     const unsubscribe = jest.fn();
     const source = {
       persist: {
@@ -427,18 +434,125 @@ describe('local persistence hydration', () => {
     const { observeLocalStoreHydration } = require('../../hooks/useLocalStoresHydrated') as {
       observeLocalStoreHydration: (
         stores: typeof source[],
-        ready: () => void
+        ready: () => void,
+        failure: (reason: string) => void,
+        timeoutMs: number
       ) => () => void;
     };
 
-    const cleanup = observeLocalStoreHydration([source], onReady);
+    const cleanup = observeLocalStoreHydration([source], onReady, onFailure, 1_000);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(source.persist.rehydrate).toHaveBeenCalledTimes(1);
-    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(onReady).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith('failed');
 
     cleanup();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports incomplete hydration when rehydrate resolves but hasHydrated stays false', async () => {
+    const onReady = jest.fn();
+    const onFailure = jest.fn();
+    const source = {
+      persist: {
+        hasHydrated: jest.fn(() => false),
+        onFinishHydration: jest.fn(() => jest.fn()),
+        rehydrate: jest.fn(async () => undefined),
+      },
+    };
+    const { observeLocalStoreHydration } = require('../../hooks/useLocalStoresHydrated') as {
+      observeLocalStoreHydration: (
+        stores: typeof source[],
+        ready: () => void,
+        failure: (reason: string) => void,
+        timeoutMs: number
+      ) => () => void;
+    };
+
+    const cleanup = observeLocalStoreHydration([source], onReady, onFailure, 1_000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onReady).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith('incomplete');
+    cleanup();
+  });
+
+  test('reports a stalled hydration attempt only once so the UI can offer retry', async () => {
+    jest.useFakeTimers();
+    const onReady = jest.fn();
+    const onFailure = jest.fn();
+    let finishHydration!: () => void;
+    const source = {
+      persist: {
+        hasHydrated: jest.fn(() => false),
+        onFinishHydration: jest.fn(() => jest.fn()),
+        rehydrate: jest.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              finishHydration = resolve;
+            })
+        ),
+      },
+    };
+    const { observeLocalStoreHydration } = require('../../hooks/useLocalStoresHydrated') as {
+      observeLocalStoreHydration: (
+        stores: typeof source[],
+        ready: () => void,
+        failure: (reason: string) => void,
+        timeoutMs: number
+      ) => () => void;
+    };
+
+    const cleanup = observeLocalStoreHydration([source], onReady, onFailure, 1_000);
+    jest.advanceTimersByTime(1_000);
+
+    expect(onReady).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith('timeout');
+    finishHydration();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
+  test('retries hydration without clearing persisted personal data', async () => {
+    let hydrated = false;
+    let storageAvailable = false;
+    const source = {
+      persist: {
+        hasHydrated: jest.fn(() => hydrated),
+        onFinishHydration: jest.fn(() => jest.fn()),
+        rehydrate: jest.fn(async () => {
+          if (storageAvailable) hydrated = true;
+        }),
+      },
+    };
+    const hydrationModule = require('../../hooks/useLocalStoresHydrated') as {
+      useLocalStoresHydration?: (
+        stores: typeof source[],
+        timeoutMs: number
+      ) => {
+        status: 'hydrating' | 'ready' | 'failed';
+        retry: () => void;
+      };
+    };
+
+    expect(hydrationModule.useLocalStoresHydration).toEqual(expect.any(Function));
+
+    const testing = require('@testing-library/react-native/pure') as typeof import('@testing-library/react-native/pure');
+    const stores = [source];
+    const { result, unmount } = testing.renderHook(() =>
+      hydrationModule.useLocalStoresHydration!(stores, 1_000)
+    );
+
+    await testing.waitFor(() => expect(result.current.status).toBe('failed'));
+    storageAvailable = true;
+    testing.act(() => result.current.retry());
+    await testing.waitFor(() => expect(result.current.status).toBe('ready'));
+
+    expect(source.persist.rehydrate).toHaveBeenCalledTimes(2);
+    unmount();
   });
 });
 
@@ -581,21 +695,25 @@ describe('Supabase auth observer', () => {
   });
 });
 
-test('root layout waits only for persisted local stores before rendering the router', () => {
+test('root layout mounts cloud observers only inside the hydrated application', () => {
   const fs = require('node:fs') as typeof import('node:fs');
   const source = fs.readFileSync('app/_layout.tsx', 'utf8');
   const hydrationHook = fs.readFileSync('hooks/useLocalStoresHydrated.ts', 'utf8');
 
-  expect(source).toContain('const localStoresHydrated = useLocalStoresHydrated();');
-  expect(source).toContain('useSupabaseAuth({ enabled: localStoresHydrated });');
-  expect(source.indexOf('const localStoresHydrated = useLocalStoresHydrated();')).toBeLessThan(
-    source.indexOf('useSupabaseAuth({ enabled: localStoresHydrated });')
+  expect(source).toMatch(/export function HydrationGate\(\)/);
+  expect(source).toMatch(/export function HydratedApplication\(\)/);
+  expect(source).toMatch(
+    /function HydrationGate\(\)[\s\S]*?status === 'ready'[\s\S]*?<HydratedApplication\s*\/>/
   );
-  expect(source).toMatch(/if\s*\(\s*!localStoresHydrated\s*\)/);
+  const applicationSource = source.slice(source.indexOf('export function HydratedApplication'));
+  expect(applicationSource).toContain('useSupabaseAuth();');
+  expect(applicationSource).toContain('useGoogleCalendarAutoSync();');
+  expect(source.match(/useSupabaseAuth\(/g)).toHaveLength(1);
+  expect(source.match(/useGoogleCalendarAutoSync\(/g)).toHaveLength(1);
   expect(source).toContain('<ActivityIndicator');
+  expect(source).toContain("accessibilityRole=\"button\"");
+  expect(source).toContain('onPress={retry}');
   expect(source).not.toContain('requestNotificationPermission');
-  expect(source).not.toMatch(/if\s*\(\s*!ready\s*\)/);
-  expect(source).not.toMatch(/if\s*\(\s*error\s*\)/);
 
   for (const store of ['useCalendarStore', 'useStampStore', 'useLocaleStore', 'useGroupStore']) {
     expect(hydrationHook).toContain(store);
@@ -604,6 +722,10 @@ test('root layout waits only for persisted local stores before rendering the rou
   expect(hydrationHook).toContain('.persist.onFinishHydration(');
   expect(hydrationHook).toContain('.persist.rehydrate()');
   expect(hydrationHook).toContain('Promise.allSettled(');
+  expect(hydrationHook).toContain("reportFailure('timeout')");
+  expect(`${source}\n${hydrationHook}`).not.toMatch(
+    /\.clearStorage\(|AsyncStorage\.clear\(|AsyncStorage\.removeItem\(/
+  );
 });
 
 test('group detail catches recoverable name and memo update failures', () => {
@@ -625,9 +747,14 @@ test('group detail shows a retryable error when memo blur save fails', () => {
   const source = fs.readFileSync('components/groups/GroupDetailSheet.tsx', 'utf8');
   const i18n = fs.readFileSync('constants/i18n.ts', 'utf8');
 
-  expect(source).toMatch(
-    /const handleSharedMemoSave = async \(\) => \{[\s\S]*?catch \(error[\s\S]*?Alert\.alert\([\s\S]*?groupDetail\.memoUpdateErr[\s\S]*?common\.cancel[\s\S]*?common\.retry[\s\S]*?onPress: \(\) => void handleSharedMemoSave\(\)/
-  );
+  expect(source).toMatch(/const handleSharedMemoSave = async \(\) => \{[\s\S]*?catch \(error/);
+  expect(source).toContain("t('groupDetail.memoUpdateErr')");
+  expect(source).toContain("t('common.cancel')");
+  expect(source).toContain("t('common.retry')");
+  expect(source).toContain('if (feedbackIsCurrent()) void handleSharedMemoSave();');
+  expect(source).toContain('memoEditRef.current');
+  expect(source).toContain('mountedRef.current');
+  expect(source).toContain('visibleRef.current');
   expect(source).toContain('onChangeText={handleSharedMemoChange}');
   expect(source).not.toMatch(/onChangeText=\{[^}]*updateSharedMemo/);
   expect(i18n.match(/'groupDetail\.memoUpdateErr':/g)).toHaveLength(2);
@@ -710,7 +837,7 @@ describe('group detail memo save behavior', () => {
     return { ...rendered, ...testing };
   }
 
-  test('serializes blur saves and sends only the latest queued draft', async () => {
+  test('forwards each blur with its draft to the store-owned save queue', async () => {
     let resolveFirst!: () => void;
     const firstSave = new Promise<void>((resolve) => {
       resolveFirst = resolve;
@@ -726,8 +853,9 @@ describe('group detail memo save behavior', () => {
     fireEvent.changeText(memoInput, 'latest draft');
     fireEvent(memoInput, 'blur');
 
-    expect(updateSharedMemo).toHaveBeenCalledTimes(1);
+    expect(updateSharedMemo).toHaveBeenCalledTimes(2);
     expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'first draft');
+    expect(updateSharedMemo).toHaveBeenNthCalledWith(2, 'group-1', 'latest draft');
 
     await act(async () => {
       resolveFirst();
@@ -735,7 +863,6 @@ describe('group detail memo save behavior', () => {
     });
 
     expect(updateSharedMemo).toHaveBeenCalledTimes(2);
-    expect(updateSharedMemo).toHaveBeenNthCalledWith(2, 'group-1', 'latest draft');
     unmount();
   });
 
@@ -761,14 +888,11 @@ describe('group detail memo save behavior', () => {
       rejectFirst(new Error('offline'));
       await Promise.resolve();
     });
-    await waitFor(() => {
-      expect(updateSharedMemo).toHaveBeenCalledTimes(3);
-    });
+    await waitFor(() => expect(updateSharedMemo).toHaveBeenCalledTimes(2));
 
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledTimes(2);
     expect(updateSharedMemo).toHaveBeenNthCalledWith(1, 'group-1', 'first draft');
     expect(updateSharedMemo).toHaveBeenNthCalledWith(2, 'group-1', 'latest draft');
-    expect(updateSharedMemo).toHaveBeenNthCalledWith(3, 'group-1', 'latest draft');
     unmount();
   });
 });
