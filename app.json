@@ -60,6 +60,15 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "a6c11064-201c-4d44-88de-855330096339"
+      }
+    },
+    "owner": "herac-apps"
   }
 }

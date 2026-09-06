@@ -47,6 +47,36 @@ function base64Url(value: Uint8Array | string): string {
   return bytes.toString('base64url');
 }
 
+// Test-only RSA-2048 fixture. Importing a fixed key avoids load-sensitive prime
+// generation inside Jest's five-second per-test deadline.
+const TEST_ONLY_APPLE_RSA_PUBLIC_JWK: JsonWebKey = {
+  kty: 'RSA',
+  n: '1CneA03WD7MYSXR38Rl7SgvP7fbmt0m4LoVJZBejFg9tNC9hPgJsj5sqOT7VNU5NIW1cH2FaXv6W8pdbkd8wBQGJuJIcIxOnvzXvzDHslkH2KInyyIkcBJi1w4hxnsFx6jKvcSHdlvWxK7RIJ9IiKHNoWse0xxwl4g9DqUaWvmfMsfY9Zngr2JaqLMDu1A2-awnqbe8sbbGxbkRPMZ4KpJ9bqHli9s-3W60JQgIaotOBiF_pUEUdF8Bsbc5O1cMRXX5E_o4pOJvUYhWnSuvIiRnBA0H4pnr7bvUKIyIDl0gT7XVx41x1Mj4wdPzGfkLsbIEqSwMImPRtVPnz5jNH-w',
+  e: 'AQAB',
+};
+
+const TEST_ONLY_APPLE_RSA_PRIVATE_JWK: JsonWebKey = {
+  ...TEST_ONLY_APPLE_RSA_PUBLIC_JWK,
+  d: 'XD1xLv6Oknf9_YslZyz5uerPLvMPjtOXv9Uy-Z4Z_JbrlqsCtaYk8xc193pAN9Mf6LVWPk5h4lFnG94YpNLj9BYD4-4IgNEkaeO8d1c9OBZ1bvdXfNgfb-An8vR419l1xtx1nW01abk0mrITeaL70GcpRE6O_TUmEAjGFR8baqvrRrU1gkKshnO8tnmUhwC0QJbaXGdq49GwDpaflJe2P0F135CJHukBB4EvuqhAP26H51lN-CQ7cR3U6pf3ky3nA9E9D1TmAtEa6ORm4oR3uA6N50tAGXHC3Mz02LB0Us5c8Fgv5buHBV5O37GqdAACemOrSfh2UvcbTdyab4_9',
+  p: '9hKeFFmS392ue2gQ8649MSdi9wos1apFD0KBA4Z0Cxva2TXgrXC0t_oq_ylZ7zF7SHu0YEn0PDopIVpnMd785uNqcS0rZUPVZPjpW0nILoNbXmrifm694UYOJi7yvKaHB2mxQJseCx6fBFWKA2ArwZW447-JdIGS51yanmQWHdU',
+  q: '3LkLJC6MF80TR-uH-cMuF9VDWD-ESTT265lNWJ7v0tI3CWVtrUb6R4NMpB_qsCV7O7pfnP5jvFUVZiQim8VyCOiqlyXeJWHDo1TwPOBu7IMKz0ArJDWuPgZ9CvJ4MCPoLnPg4kr1ccYeTOrFeWgAe2R4WpsGOfCtICWG4OY_Jo8',
+  dp: 'HRCz5VlzNMgdfOwc3HufNLgfQ2jLRO2YvKWxUXZHLKy8m912TWY7omOFQqBixBMHKdeaxajWlWqVQyBHgieBndAM2ZNpRcvOX9_ayHKdl4jiePONDzwLZ5l7wFzZRRkyZ9i_HA92a__Q7pUf-SgZ4wLJVPVhygYoEPXqOX0-84U',
+  dq: 'sqJQEghZ-SlP4XUNp2X_d-pxhophVZ43-JUps_9tuQHI6SHdkc9P33C0JmBuYAD1q3E60KRRs6polzHHkKpLkEo9RfavwzFMVHP5ukspeuDTbshQIg4P5sL5kFKMUum8j1vZNUvVOS9OdpHLIGa7fSHjBfFRKLNQaiP09S9jDKE',
+  qi: 'UVelKCoABvSf9GM50zf2LgHGckCS_3TU1PCeS8V8IrBYunqRWeqyCRXoO6FWYyLJjPiil4BDtuxYMmvFNmofTz3LJAq-e5e1D6BVpXgslSKjvEfUNAaFvthGsY8cqY4RW44wosMGDl4f8aWLkNZyZLBc6gfdOoq1qx5vgo-sWPk',
+};
+
+function importTestOnlyAppleSigningKey(): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    'jwk',
+    TEST_ONLY_APPLE_RSA_PRIVATE_JWK,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+}
+
+const APPLE_CRYPTO_TEST_TIMEOUT_MS = 15_000;
+
 describe('Edge Function request security', () => {
   test('documents every provider allowlist required by deployed functions', () => {
     const environmentExample = read('.env.example');
@@ -366,17 +396,8 @@ describe('Edge Function request security', () => {
   });
 
   test('verifies Apple identity-token signature, audience, time, and nonce', async () => {
-    const keys = await crypto.subtle.generateKey(
-      {
-        name: 'RSASSA-PKCS1-v1_5',
-        modulusLength: 2048,
-        publicExponent: new Uint8Array([1, 0, 1]),
-        hash: 'SHA-256',
-      },
-      true,
-      ['sign', 'verify'],
-    );
-    const publicJwk = await crypto.subtle.exportKey('jwk', keys.publicKey);
+    const privateKey = await importTestOnlyAppleSigningKey();
+    const publicJwk = TEST_ONLY_APPLE_RSA_PUBLIC_JWK;
     const now = 1_800_000_000;
     const header = base64Url(JSON.stringify({ alg: 'RS256', kid: 'apple-key-1' }));
     const payload = base64Url(JSON.stringify({
@@ -390,7 +411,7 @@ describe('Edge Function request security', () => {
     const signingInput = `${header}.${payload}`;
     const signature = await crypto.subtle.sign(
       'RSASSA-PKCS1-v1_5',
-      keys.privateKey,
+      privateKey,
       new TextEncoder().encode(signingInput),
     );
     const token = `${signingInput}.${base64Url(new Uint8Array(signature))}`;
@@ -435,20 +456,11 @@ describe('Edge Function request security', () => {
       nowSeconds: now,
       fetchJwks,
     })).rejects.toThrow(/signature/i);
-  });
+  }, APPLE_CRYPTO_TEST_TIMEOUT_MS);
 
   test('verifies Apple account-event JWS signature, audience, expiry, event type, and subject', async () => {
-    const keys = await crypto.subtle.generateKey(
-      {
-        name: 'RSASSA-PKCS1-v1_5',
-        modulusLength: 2048,
-        publicExponent: new Uint8Array([1, 0, 1]),
-        hash: 'SHA-256',
-      },
-      true,
-      ['sign', 'verify'],
-    );
-    const publicJwk = await crypto.subtle.exportKey('jwk', keys.publicKey);
+    const privateKey = await importTestOnlyAppleSigningKey();
+    const publicJwk = TEST_ONLY_APPLE_RSA_PUBLIC_JWK;
     const now = 1_800_000_000;
     const sign = async (claims: Record<string, unknown>) => {
       const header = base64Url(JSON.stringify({ alg: 'RS256', kid: 'apple-events-key' }));
@@ -456,7 +468,7 @@ describe('Edge Function request security', () => {
       const signingInput = `${header}.${payload}`;
       const signature = await crypto.subtle.sign(
         'RSASSA-PKCS1-v1_5',
-        keys.privateKey,
+        privateKey,
         new TextEncoder().encode(signingInput),
       );
       return `${signingInput}.${base64Url(new Uint8Array(signature))}`;
@@ -541,7 +553,7 @@ describe('Edge Function request security', () => {
     }), {
       clientIds: ['com.herac.recoto'], nowSeconds: now, fetchJwks,
     })).rejects.toThrow(/event/i);
-  });
+  }, APPLE_CRYPTO_TEST_TIMEOUT_MS);
 });
 
 describe('account lifecycle Edge Function contracts', () => {
