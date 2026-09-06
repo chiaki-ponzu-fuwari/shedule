@@ -670,12 +670,15 @@ describe('server-confirmed group edits', () => {
   });
 });
 
+const GROUP_DETAIL_INTEGRATION_TIMEOUT_MS = 15_000;
+
 describe('group detail lifecycle safety', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     jest.dontMock('../store/groupStore');
     jest.dontMock('../store/calendarStore');
     jest.dontMock('../store/stampStore');
+    jest.dontMock('../store/useModerationStore');
     jest.dontMock('../constants/i18n');
     jest.dontMock('@expo/vector-icons');
     jest.dontMock('../utils/haptics');
@@ -699,10 +702,23 @@ describe('group detail lifecycle safety', () => {
       myUserId: 'user-a',
       myName: 'A',
     };
+    const moderationState = {
+      blockedUserIds: [],
+      busyUserIds: [],
+      fetchBlocks: jest.fn(async () => undefined),
+      blockUser: jest.fn(async () => undefined),
+      unblockUser: jest.fn(async () => undefined),
+      reportContent: jest.fn(async () => undefined),
+      removeAndBanMember: jest.fn(async () => undefined),
+    };
 
     jest.resetModules();
     jest.doMock('../store/groupStore', () => ({
       useGroupStore: (selector: (state: typeof groupState) => unknown) => selector(groupState),
+    }));
+    jest.doMock('../store/useModerationStore', () => ({
+      useModerationStore: (selector: (state: typeof moderationState) => unknown) =>
+        selector(moderationState),
     }));
     jest.doMock('../store/calendarStore', () => ({
       useCalendarStore: (selector: (state: { entries: object }) => unknown) =>
@@ -763,6 +779,7 @@ describe('group detail lifecycle safety', () => {
     });
     expect(confirm).not.toHaveBeenCalled();
     if (lifecycle === 'hide') rendered.unmount();
-    }
+    },
+    GROUP_DETAIL_INTEGRATION_TIMEOUT_MS,
   );
 });
