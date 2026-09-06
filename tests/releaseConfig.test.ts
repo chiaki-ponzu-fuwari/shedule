@@ -21,6 +21,7 @@ const { PNG } = require('pngjs') as {
 
 const ROOT = path.resolve(__dirname, '..');
 const APP_JSON_PATH = path.join(ROOT, 'app.json');
+const EAS_JSON_PATH = path.join(ROOT, 'eas.json');
 const INFO_PLIST_PATH = path.join(ROOT, 'ios/app/Info.plist');
 const PRIVACY_MANIFEST_PATH = path.join(ROOT, 'ios/app/PrivacyInfo.xcprivacy');
 const PBXPROJ_PATH = path.join(ROOT, 'ios/app.xcodeproj/project.pbxproj');
@@ -101,6 +102,26 @@ describe('Recoto release identity', () => {
     expect(expo.ios.usesAppleSignIn).toBe(true);
     expect(expo.ios.infoPlist?.CFBundleAllowMixedLocalizations).toBe(true);
     expect(expo.plugins).toContain('expo-apple-authentication');
+  });
+
+  test('links the production EAS project and selects the production environment', () => {
+    const { expo } = readJson<{ expo: Record<string, any> }>(APP_JSON_PATH);
+    const eas = readJson<{
+      cli: { appVersionSource?: string };
+      build: { production?: { autoIncrement?: boolean; environment?: string } };
+      submit: { production?: Record<string, unknown> };
+    }>(EAS_JSON_PATH);
+
+    expect(expo.owner).toBe('herac-apps');
+    expect(expo.extra?.eas?.projectId).toBe('a6c11064-201c-4d44-88de-855330096339');
+    expect(eas.cli.appVersionSource).toBe('remote');
+    expect(eas.build.production).toEqual(
+      expect.objectContaining({
+        autoIncrement: true,
+        environment: 'production',
+      }),
+    );
+    expect(eas.submit.production).toEqual(expect.any(Object));
   });
 
   test('configures distinct release and notification artwork plus a concrete photo purpose', () => {
